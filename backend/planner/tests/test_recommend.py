@@ -120,6 +120,25 @@ def test_every_reason_and_tradeoff_shows_the_difference_it_names():
 
 
 def test_a_stretch_under_a_mile_is_not_called_zero_miles():
-    for under_a_mile in (0.3, 0.5):
-        assert reason(risk(), risk(no_travel=under_a_mile)) == (
-            "The other routes cross No Travel weather (under 1 mi on the next best).")
+    assert reason(risk(), risk(no_travel=0.3)) == (
+        "The other routes cross No Travel weather (under 1 mi on the next best).")
+    assert reason(risk(), risk(no_travel=0.5)) == (  # half a mile rounds up, as on the card
+        "The other routes cross No Travel weather (1 mi on the next best).")
+
+
+def test_figures_are_rounded_the_way_the_browser_shows_them():
+    # the panel rounds half up (JavaScript's toFixed and toLocaleString); Python's round() would go half to even
+    # and read 12.5 mi as 12 here while the card says 13
+    assert rank([risk(severe=12.5, seconds=36_000), risk(severe=13.4, seconds=33_000)]) == [1, 0]  # both read 13 mi
+    assert rank([risk(average=0.125, seconds=36_000), risk(average=0.134, seconds=33_000)]) == [1, 0]  # both 0.13
+    assert reason(risk(severe=11.5), risk(severe=12.5)) == "Fewer Severe miles than the next route (12 mi vs 13 mi)."
+    assert reason(risk(average=0.115), risk(average=0.125)) == "Lower average risk than the next route (0.12 vs 0.13)."
+
+
+def test_travel_time_is_compared_to_the_minute_the_cards_show():
+    assert reason(risk(seconds=36_000), risk(seconds=36_020)).startswith("Tied")  # both read 10 h 00 min
+    assert rank([risk(seconds=36_020), risk(seconds=36_000)]) == [0, 1]  # a tie keeps the order the routes came in
+    # the extra time is the difference between the two cards' times
+    assert tradeoff(risk(high=0, seconds=36_031), risk(high=50, seconds=36_009), "Route A").startswith(
+        "1 min longer")  # 10 h 01 min against 10 h 00 min, although only 22 s apart
+    assert tradeoff(risk(high=0, seconds=36_029), risk(high=50, seconds=35_971), "Route A") is None  # both 10 h 00

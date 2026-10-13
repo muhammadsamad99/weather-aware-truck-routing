@@ -10,13 +10,20 @@ without one (and among those, fewer No Travel miles first): No Travel is worse t
 treats it as a stop.
 """
 from dataclasses import dataclass
+from decimal import ROUND_HALF_UP, Decimal
 
 from .risk import HIGH, LEVEL_NAMES, NO_TRAVEL, SEVERE
 
-# Miles are compared in whole miles and average risk to 2 decimals, the precision the panel shows them at:
-# a difference too small to show never decides a ranking, and every reason shows the difference it names.
-MILE_PRECISION = 0
-AVERAGE_PRECISION = 2
+AVERAGE_PLACES = 2
+
+
+def shown(value: float, places: int = 0) -> Decimal:
+    """A figure as the panel shows it. Every figure is compared, and written into a reason, this way: whole
+    miles, average risk to two decimals and travel time to the minute. So a difference too small to show never
+    decides a ranking, and every reason shows the difference it names. The browser rounds half up on the exact
+    value (toFixed, toLocaleString, Math.round), where Python's round() goes half to even (12.5 to 12), so the
+    same rule is used here."""
+    return Decimal(value).quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
 
 
 @dataclass(frozen=True)
@@ -39,9 +46,8 @@ class RouteRisk:
         return self.miles_by_level[NO_TRAVEL]
 
     def sort_key(self) -> tuple:
-        r = round
-        return (self.no_travel_miles > 0, r(self.no_travel_miles, MILE_PRECISION), r(self.severe_miles, MILE_PRECISION),
-                r(self.high_miles, MILE_PRECISION), r(self.average, AVERAGE_PRECISION), round(self.total_seconds))
+        return (self.no_travel_miles > 0, shown(self.no_travel_miles), shown(self.severe_miles), shown(self.high_miles),
+                shown(self.average, AVERAGE_PLACES), _minutes(self.total_seconds))
 
 
 def route_risk(checkpoint_miles: list[float], checkpoint_levels: list[int], total_seconds: float) -> RouteRisk:
@@ -71,15 +77,15 @@ def reason(best: RouteRisk, runner_up: RouteRisk | None) -> str:
         return "Only one route was found."
     if best.no_travel_miles == 0 and runner_up.no_travel_miles > 0:
         return f"The other routes cross No Travel weather ({_miles(runner_up.no_travel_miles)} on the next best)."
-    miles = round
     for label, a, b in (("fewer No Travel miles", best.no_travel_miles, runner_up.no_travel_miles),
                         ("fewer Severe miles", best.severe_miles, runner_up.severe_miles),
                         ("fewer High miles", best.high_miles, runner_up.high_miles)):
-        if miles(a, MILE_PRECISION) != miles(b, MILE_PRECISION):
+        if shown(a) != shown(b):
             return f"{label[0].upper()}{label[1:]} than the next route ({_miles(a)} vs {_miles(b)})."
-    if round(best.average, AVERAGE_PRECISION) != round(runner_up.average, AVERAGE_PRECISION):
-        return f"Lower average risk than the next route ({best.average:.2f} vs {runner_up.average:.2f})."
-    if round(best.total_seconds) != round(runner_up.total_seconds):
+    if shown(best.average, AVERAGE_PLACES) != shown(runner_up.average, AVERAGE_PLACES):
+        return (f"Lower average risk than the next route "
+                f"({shown(best.average, AVERAGE_PLACES)} vs {shown(runner_up.average, AVERAGE_PLACES)}).")
+    if _minutes(best.total_seconds) != _minutes(runner_up.total_seconds):
         return (f"Same weather risk as the next route; shorter travel time "
                 f"({_hours(best.total_seconds)} vs {_hours(runner_up.total_seconds)}).")
     return "Tied with the next route on every criterion; listed first."
@@ -89,34 +95,36 @@ def tradeoff(best: RouteRisk, fastest: RouteRisk, fastest_name: str, say_gain: b
     """What the recommended route buys over the fastest route, when they differ: the extra driving time and
     the first criterion (in ranking order) on which the recommended route is better. With `say_gain` off
     (the reason already compares against this route), only the time."""
-    extra = best.total_seconds - fastest.total_seconds
-    if round(extra / 60) <= 0:
+    extra = _minutes(best.total_seconds) - _minutes(fastest.total_seconds)  # as the two cards show it
+    if extra <= 0:
         return None
     if not say_gain:
         return f"It takes {_duration(extra)} longer than {fastest_name}, the fastest route."
-    miles = round
     for label, a, b in (("No Travel", best.no_travel_miles, fastest.no_travel_miles),
                         ("Severe", best.severe_miles, fastest.severe_miles),
                         ("High", best.high_miles, fastest.high_miles)):
-        if miles(a, MILE_PRECISION) != miles(b, MILE_PRECISION):
+        if shown(a) != shown(b):
             gain = f"fewer {label} miles ({_miles(a)} vs {_miles(b)})"
             break
     else:
-        if round(best.average, AVERAGE_PRECISION) == round(fastest.average, AVERAGE_PRECISION):
+        if shown(best.average, AVERAGE_PLACES) == shown(fastest.average, AVERAGE_PLACES):
             return None  # equal risk: the faster route would have ranked first
-        gain = f"lower average risk ({best.average:.2f} vs {fastest.average:.2f})"
+        gain = f"lower average risk ({shown(best.average, AVERAGE_PLACES)} vs {shown(fastest.average, AVERAGE_PLACES)})"
     return f"{_duration(extra)} longer than {fastest_name}, the fastest route, for {gain}."
 
 
 def _miles(miles: float) -> str:
-    return "under 1 mi" if miles > 0 and round(miles) == 0 else f"{miles:.0f} mi"  # round(0.5) is 0
+    return "under 1 mi" if miles > 0 and shown(miles) == 0 else f"{shown(miles):,} mi"
 
 
-def _duration(seconds: float) -> str:
-    minutes = round(seconds / 60)
-    return f"{minutes} min" if minutes < 60 else _hours(seconds)
+def _minutes(seconds: float) -> int:
+    return int(shown(seconds / 60))
+
+
+def _duration(minutes: int) -> str:
+    return f"{minutes} min" if minutes < 60 else f"{minutes // 60} h {minutes % 60:02d} min"
 
 
 def _hours(seconds: float) -> str:
-    minutes = round(seconds / 60)
+    minutes = _minutes(seconds)
     return f"{minutes // 60} h {minutes % 60:02d} min"
