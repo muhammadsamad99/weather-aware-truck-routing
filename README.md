@@ -1,14 +1,16 @@
 # Weather-Aware Truck Routing
 
+[![CI](https://github.com/muhammadsamad99/weather-aware-truck-routing/actions/workflows/ci.yml/badge.svg)](https://github.com/muhammadsamad99/weather-aware-truck-routing/actions/workflows/ci.yml)
+
 Helps a truck driver choose the safest route for a trip. Enter the origin, destination, departure time and
 load. The app finds three routes and checks the forecast at checkpoints every 10, 25 or 50 miles, for the
 hour the truck will be at each one. It rates each checkpoint on the risk table, adjusted for the load, and
 recommends a route with the reason. A heatmap with a 0–48 hour slider shows the weather risk along the
 trip corridor.
 
-React + TypeScript + MapLibre on the front end, Django + Django REST Framework behind it.
+React + TypeScript + Material UI + MapLibre GL on the front end, Django + Django REST Framework behind it.
 
-![Tulsa to St. Louis in rain: three routes, checkpoints coloured by risk, and the corridor heatmap two hours after departure](docs/screenshot.jpg)
+![Chicago to Denver: three routes tagged with distance and driving time, the recommended route with what its extra time buys, checkpoints coloured by risk, and the corridor heatmap 24 hours after departure](docs/screenshot.jpg)
 
 ## Using it
 
@@ -22,12 +24,29 @@ React + TypeScript + MapLibre on the front end, Django + Django REST Framework b
    - No Travel, Severe and High miles;
    - the average risk.
 
+   When the recommended route isn't the fastest, the panel also says how much longer it takes and what that
+   buys.
+
    Click a card, or a route on the map, to select it. The table below the cards lists the selected route's
-   checkpoints with their arrival times, forecast and risk. Click a row to find that checkpoint on the map.
+   checkpoints with their arrival times, forecast and risk. Click a row (or press Enter on it) to find that
+   checkpoint on the map.
 3. **On the map:**
-   - Every checkpoint is coloured by its risk; click one for the details.
+   - Each route has a tag with its distance and driving time.
+   - Every checkpoint is coloured by its risk; hover one for its arrival time, click it for the details.
    - The slider moves the heatmap through the next 48 hours from departure; ▶ plays it.
    - The dark square marks where the truck is, on the selected route, at the slider's hour.
+
+## How the brief is covered
+
+| The brief asks for | Where it is | Checked by |
+|---|---|---|
+| Origin, destination, departure date/time, load | `TripForm`, `PlaceInput` → `POST /api/plan`, validated in `planner/serializers.py` | `test_service_and_api.py`, `App.test.tsx` |
+| 3 route options from a routing API | `planner/providers/valhalla.py` | `test_valhalla.py` |
+| Weather every 10/25/50 mi at the truck's ETA | `planner/checkpoints.py`, `planner/weather.py` | `test_checkpoints.py`, `test_weather.py` |
+| The risk table and load rules | `planner/risk.py` | `test_risk.py`, `test_legend.py` |
+| A recommendation that balances risk and time, in the brief's order | `planner/recommend.py` (the order, the reason, the trade-off line) | `test_recommend.py`, `test_service_and_api.py` |
+| Routes, checkpoints, risk levels, ETAs and route summaries on a map | `MapView.tsx` (route lines and tags, coloured checkpoints, hover and popups), `RouteCards.tsx` | `App.test.tsx` for the panel; the drawn map was checked in headless Chrome during development (not in CI) |
+| A heatmap along the corridor with a 0–48 h slider | `planner/heatmap.py`, `service._heatmap`, `HeatmapControl.tsx` | `test_heatmap.py`, `test_service_and_api.py` |
 
 ## How a plan is made
 
@@ -142,7 +161,7 @@ Every service is free and needs no API key.
 
 | Service | Used for | Limits |
 |---|---|---|
-| [Valhalla](https://valhalla.github.io/valhalla/) public server, run by [FOSSGIS](https://www.fossgis.de/) | Truck routes | The [usage policy](https://routing.openstreetmap.de/about.html) allows at most one request per second, with attribution and a "fix the map" link (both in the panel footer). The whole service spaces its requests a second apart, and routes are cached. One request may not span more than 1,500 km, so longer trips are routed in legs and joined. The server is sometimes busy, so a busy answer is retried once. |
+| [Valhalla](https://valhalla.github.io/valhalla/) public server, run by [FOSSGIS](https://www.fossgis.de/) | Truck routes | The [usage policy](https://routing.openstreetmap.de/about.html) allows at most one request per second, with attribution and a "fix the map" link (both in the panel footer). The whole service spaces its requests a second apart, and routes are cached. One request may not span more than 1,500 km, so longer trips are routed in legs and joined. The server is sometimes busy, so a busy or "overloaded" answer is tried twice more, 1.5 s and then 3 s later. |
 | [Open-Meteo](https://open-meteo.com) | Hourly forecasts | Free for non-commercial use: 600 calls a minute and 10,000 a day. The terms don't say how a request for many locations counts, but each location seems to count as a call: one coast-to-coast plan of about 1,000 locations hit the per-minute limit on its own. So a plan asks for at most 450 (see above), and the whole service asks for at most 560 in any minute: a plan that would go over waits until the minute frees up (at most a minute). Open-Meteo's own limit message can still appear, for example if the host shares its outgoing address with other apps that use Open-Meteo. Forecasts are cached for an hour per cell. |
 | [Photon](https://photon.komoot.io) | Place search | Fair use. Results are cached for a day. |
 | [OpenFreeMap](https://openfreemap.org) | Base map | None stated. If the base map style cannot load, the routes and weather still draw on a plain background. |
@@ -158,7 +177,8 @@ miles and seconds. Implement one next to `valhalla.py` and select it in `service
 
 ## Running it locally
 
-You need Python 3.11+ and Node 20+.
+You need Python 3.11 or newer and a current Node LTS. It is tested with Python 3.11.9 and Node 24.21.0, the
+versions `render.yaml` and CI pin.
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
@@ -184,10 +204,12 @@ cd backend && pytest && ruff check .
 cd frontend && npm run lint && npx tsc -b && npm test
 ```
 
-The backend tests (125) cover:
+CI runs all of these on every push and pull request (`.github/workflows/ci.yml`).
+
+The backend tests (131) cover:
 
 - **Risk table:** every edge and every load rule.
-- **Ranking:** each step of the recommendation order, and its reason messages.
+- **Ranking:** each step of the recommendation order, its reason messages and the trade-off line.
 - **Checkpoints:** spacing and ETAs.
 - **Polyline decoding and trip parsing:** against a recorded Valhalla response.
 - **Route candidates:** alternates, detours, near-duplicates, spurs, and long trips split into legs.
@@ -202,9 +224,15 @@ The backend tests (125) cover:
 - **The API:** with routing, weather and places replaced by fakes. Any request a test makes to a host other
   than this machine fails the test.
 
-The frontend tests (8, Vitest) cover the app without WebGL (the form and every result still work, and the
-map area says why the map is missing), a map that breaks for any other reason, and the truck's position at
-an hour.
+The frontend tests (13, Vitest and Testing Library) cover:
+
+- **The place boxes:** a search only from three letters and once per pause in typing, a picked place kept
+  until typed over, and picked places sent as coordinates.
+- **A failed re-plan:** keeps the last results on screen and says so.
+- **The map's failure paths:** the app without WebGL (the form and every result still work, and the map area
+  says why the map is missing), a map that breaks for another reason, and a lost graphics context.
+- **Risk chips:** every label reads at 4.5:1 or better on its colour.
+- **The truck's position** at an hour.
 
 ## Deploying
 
@@ -226,6 +254,8 @@ takes about a minute.
   Content-Security-Policy), and other sites can't frame it.
 - Answers from the outside services are read within a time and size limit, so a slow or broken service
   can't hold the server.
+- Dependencies were audited on 2026-10-14: `npm audit` reported no vulnerabilities, and `pip-audit` none in
+  `backend/requirements*.txt`. CI doesn't run these audits, so re-run them before a release.
 
 ## Project layout
 
@@ -244,11 +274,18 @@ backend/
     views.py, serializers.py
     tests/
 frontend/src/
-  App.tsx                 form state and layout
-  components/             TripForm, PlaceInput, MapView, RouteCards, CheckpointTable, HeatmapControl, Legend
+  App.tsx                 form state and the page layout
+  theme.ts                the Material UI theme; levels.ts holds the risk colours
+  components/
+    TripForm, PlaceInput  the trip form and the place search
+    Recommendation, RouteCards, CheckpointTable, Legend
+    MapPane, MapView      the map (MapLibre, loaded separately) and its heatmap state
+    HeatmapControl        the 0-48 h slider
+    MapFallback           what shows when the map can't be drawn
   api.ts, types.ts        the API and its response shapes
   geometry.ts             the truck's position at an hour, map bounds
 render.yaml, build.sh     deployment
+.github/workflows/ci.yml  tests, lint, type check and build on every push
 ```
 
 ## Known limitations
