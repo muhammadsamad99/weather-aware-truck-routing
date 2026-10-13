@@ -1,0 +1,170 @@
+"""The trip plan: routes, checkpoints, the weather at each checkpoint when the truck gets there, the risk,
+the recommended route and the corridor heatmap, as one JSON-ready dict."""
+import hashlib
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+
+from django.conf import settings
+from django.core.cache import cache
+
+from .checkpoints import checkpoints
+from .geo import haversine_mi
+from .geocode import Geocoder, Place
+from .heatmap import corridor_points
+from .providers.base import RouteOption, RoutingError, RoutingProvider
+from .providers.valhalla import ValhallaProvider
+from .recommend import rank, reason, route_risk
+from .risk import LEVEL_NAMES, assess
+from .weather import Forecasts, hour_floor
+
+HEATMAP_HOURS = 48
+ROUTE_CACHE_SECONDS = 6 * 3600
+GEOMETRY_STEP_MI = 0.4  # map geometry is thinned to a point every 0.4 mi; the logic uses the full route
+
+
+@dataclass(frozen=True)
+class TripRequest:
+    origin: Place
+    destination: Place
+    departure: datetime  # timezone-aware
+    load_lb: float
+    interval_mi: int
+
+
+def make_provider() -> RoutingProvider:
+    if settings.ROUTING_PROVIDER == "valhalla":
+        return ValhallaProvider(settings.VALHALLA_URL, settings.HTTP_USER_AGENT, settings.HTTP_TIMEOUT_SECONDS)
+    if settings.ROUTING_PROVIDER == "here":
+        from .providers.here import HereProvider
+
+        return HereProvider(settings.HERE_API_KEY, settings.HTTP_USER_AGENT, settings.HTTP_TIMEOUT_SECONDS)
+    raise RoutingError(f"Unknown routing provider '{settings.ROUTING_PROVIDER}'.")
+
+
+def make_geocoder() -> Geocoder:
+    return Geocoder(settings.PHOTON_URL, settings.HTTP_USER_AGENT, settings.HTTP_TIMEOUT_SECONDS)
+
+
+def make_forecasts() -> Forecasts:
+    return Forecasts(settings.OPEN_METEO_URL, settings.HTTP_USER_AGENT, settings.HTTP_TIMEOUT_SECONDS)
+
+
+def plan_trip(trip: TripRequest, provider: RoutingProvider | None = None, forecasts: Forecasts | None = None) -> dict:
+    provider = provider or make_provider()
+    forecasts = forecasts or make_forecasts()
+    origin, destination = (trip.origin.lat, trip.origin.lon), (trip.destination.lat, trip.destination.lon)
+    if haversine_mi(origin, destination) < 1:
+        raise RoutingError("Origin and destination are the same place.")
+    routes = cached_routes(provider, origin, destination, trip.load_lb)
+
+    route_cps = [checkpoints(r, trip.interval_mi, trip.departure) for r in routes]
+    grid = corridor_points([r.points for r in routes])
+    last_eta = max(cps[-1].eta for cps in route_cps)
+    start = hour_floor(trip.departure)
+    end = max(last_eta, start + timedelta(hours=HEATMAP_HOURS)) + timedelta(hours=1)
+    forecasts.load([(c.lat, c.lon) for cps in route_cps for c in cps] + grid, start.date(), end.date())
+
+    results, risks = [], []
+    for route, cps in zip(routes, route_cps, strict=True):
+        rows, levels = [], []
+        for c in cps:
+            wx = forecasts.at(c.lat, c.lon, c.eta)
+            a = assess(wx.wind_mph, wx.rain_in_hr, wx.snow_in_hr, trip.load_lb)
+            levels.append(a.level)
+            rows.append({
+                "index": c.index, "mile": round(c.mile, 1), "lat": round(c.lat, 5), "lon": round(c.lon, 5),
+                "eta": _iso(c.eta),
+                "wind_mph": round(wx.wind_mph, 1), "rain_in_hr": round(wx.rain_in_hr, 3),
+                "snow_in_hr": round(wx.snow_in_hr, 3),
+                "level": a.level, "level_name": a.name, "reasons": list(a.reasons),
+            })
+        risk = route_risk([c.mile for c in cps], levels, route.total_seconds)
+        risks.append(risk)
+        results.append(_route_json(route, rows, risk, trip.departure))
+
+    order = rank(risks)
+    best = order[0]
+    runner_up = order[1] if len(order) > 1 else None
+    for position, i in enumerate(order, start=1):
+        results[i]["rank"] = position
+        results[i]["recommended"] = i == best
+
+    return {
+        "origin": trip.origin.as_dict(),
+        "destination": trip.destination.as_dict(),
+        "departure": _iso(trip.departure),
+        "load_lb": trip.load_lb,
+        "interval_mi": trip.interval_mi,
+        "provider": provider.name,
+        "routes": results,
+        "recommended": results[best]["name"],
+        "reason": reason(risks[best], risks[runner_up] if runner_up is not None else None),
+        "levels": list(LEVEL_NAMES),
+        "heatmap": _heatmap(grid, forecasts, trip),
+    }
+
+
+def cached_routes(provider: RoutingProvider, origin, destination, load_lb: float) -> list[RouteOption]:
+    """Routes for the trip, from the cache when the same trip (places to ~10 m, load to 1,000 lb) was routed
+    in the last ROUTE_CACHE_SECONDS: routes don't change with the weather, so a re-plan only refetches that."""
+    key = "route:" + hashlib.sha256(repr((provider.name, [round(v, 4) for v in (*origin, *destination)],
+                                          round(load_lb, -3))).encode()).hexdigest()
+    routes = cache.get(key)
+    if routes is None:
+        routes = provider.routes(origin, destination, load_lb, count=3)
+        cache.set(key, routes, ROUTE_CACHE_SECONDS)
+    return routes
+
+
+def _iso(moment: datetime) -> str:
+    return moment.astimezone(UTC).replace(microsecond=0).isoformat()
+
+
+def _route_json(route: RouteOption, rows: list[dict], risk, departure: datetime) -> dict:
+    return {
+        "name": route.name,
+        "provider": route.provider,
+        "miles": round(route.total_miles, 1),
+        "seconds": round(route.total_seconds),
+        "arrival": _iso(departure + timedelta(seconds=route.total_seconds)),
+        "geometry": _thin(route),
+        "checkpoints": rows,
+        "risk": {
+            "miles_by_level": dict(zip(LEVEL_NAMES, risk.miles_by_level, strict=True)),
+            "average": risk.average,
+            "severe_miles": risk.severe_miles,
+            "high_miles": risk.high_miles,
+            "no_travel_miles": risk.no_travel_miles,
+        },
+    }
+
+
+def _thin(route: RouteOption) -> list[list[float]]:
+    """[lon, lat] pairs (GeoJSON order), keeping a point every GEOMETRY_STEP_MI and the last one."""
+    out, next_mark = [], 0.0
+    for (lat, lon), mile in zip(route.points, route.miles, strict=True):
+        if mile >= next_mark:
+            out.append([round(lon, 5), round(lat, 5)])
+            next_mark = mile + GEOMETRY_STEP_MI
+    last = route.points[-1]
+    if out[-1] != [round(last[1], 5), round(last[0], 5)]:
+        out.append([round(last[1], 5), round(last[0], 5)])
+    return out
+
+
+def _heatmap(grid, forecasts: Forecasts, trip: TripRequest) -> dict:
+    """The risk level at each corridor point for each hour from departure to departure + 48 h."""
+    frames = []
+    for k in range(HEATMAP_HOURS + 1):
+        moment = trip.departure + timedelta(hours=k)
+        frame = []
+        for lat, lon in grid:
+            wx = forecasts.at(lat, lon, moment)
+            frame.append(assess(wx.wind_mph, wx.rain_in_hr, wx.snow_in_hr, trip.load_lb).level)
+        frames.append(frame)
+    return {
+        "start": _iso(trip.departure),
+        "hours": HEATMAP_HOURS,
+        "points": [[lon, lat] for lat, lon in grid],
+        "frames": frames,
+    }
