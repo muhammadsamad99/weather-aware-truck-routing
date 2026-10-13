@@ -10,7 +10,7 @@ from planner.geo import cumulative_miles, offset_point
 from planner.geocode import Place
 from planner.providers.base import RouteOption, RoutingError
 from planner.risk import HIGH, LOW, NO_TRAVEL
-from planner.weather import HourWeather, WeatherError
+from planner.weather import ForecastRangeError, HourWeather, WeatherError
 
 DEPARTURE = (datetime.now(UTC) + timedelta(days=1)).replace(hour=11, minute=0, second=0, microsecond=0)
 ORIGIN = Place("Origin", 40.0, -90.0)
@@ -192,3 +192,60 @@ def test_geocode_needs_three_characters_and_accepts_coordinates():
     coords = {"label": "41.8800, -87.6300", "lat": 41.88, "lon": -87.63}
     assert c.get("/api/geocode", {"q": "41.88, -87.63"}).json() == {"results": [coords]}
     assert c.get("/api/health").json() == {"ok": True}
+
+
+class FakeGeocoder:
+    def __init__(self, error=None):
+        self.error = error
+
+    def first(self, query):
+        if self.error:
+            raise self.error
+        return Place(query, 40.0, -90.0) if query == "Here" else Place(query, 41.4, -90.0)
+
+
+@override_settings(ALLOWED_HOSTS=["testserver"])
+def test_an_unknown_place_is_a_400_but_a_failing_place_service_is_a_502(monkeypatch):
+    from planner.geocode import GeocodeError, PlaceNotFound
+
+    monkeypatch.setattr(service, "make_geocoder", lambda: FakeGeocoder(PlaceNotFound("No place matches 'Nowhere'.")))
+    r = post(valid_body(origin="Nowhere"))
+    assert r.status_code == 400 and r.json()["error"] == "No place matches 'Nowhere'."
+    monkeypatch.setattr(service, "make_geocoder", lambda: FakeGeocoder(GeocodeError("Place search failed (HTTP 503).")))
+    r = post(valid_body(origin="Nowhere"))
+    assert r.status_code == 502
+
+
+@override_settings(ALLOWED_HOSTS=["testserver"])
+def test_typed_places_are_looked_up(monkeypatch):
+    monkeypatch.setattr(service, "make_geocoder", lambda: FakeGeocoder())
+    monkeypatch.setattr(service, "make_provider", lambda: FakeProvider([route("Route A", 0, 100)]))
+    monkeypatch.setattr(service, "make_forecasts", lambda: FakeForecasts(calm))
+    r = post(valid_body(origin="Here", destination="There"))
+    assert r.status_code == 200
+    assert (r.json()["origin"]["label"], r.json()["destination"]["label"]) == ("Here", "There")
+
+
+@override_settings(ALLOWED_HOSTS=["testserver"])
+def test_a_trip_ending_past_the_forecast_is_a_400_on_the_departure(monkeypatch):
+    class TooFar(FakeForecasts):
+        def load(self, locations, start, end):
+            raise ForecastRangeError("Forecasts reach about two weeks ahead.")
+
+    monkeypatch.setattr(service, "make_provider", lambda: FakeProvider([route("Route A", 0, 100)]))
+    monkeypatch.setattr(service, "make_forecasts", lambda: TooFar(calm))
+    r = post(valid_body())
+    assert r.status_code == 400 and "departure" in r.json()["fields"]
+
+
+def test_routes_are_cached_for_the_exact_load_only():
+    provider = FakeProvider([route("Route A", 0, 100)])
+    for load in (44_600, 45_400, 44_600):  # either side of 80,000 lb gross with a 35,000 lb tractor-trailer
+        service.plan_trip(trip(load=load), provider=provider, forecasts=FakeForecasts(calm))
+    assert provider.calls == 2
+
+
+def test_the_plan_reports_the_weather_grid():
+    plan = service.plan_trip(trip(), provider=FakeProvider([route("Route A", 0, 100)]),
+                             forecasts=FakeForecasts(calm))
+    assert plan["weather_grid_deg"] == 0.1

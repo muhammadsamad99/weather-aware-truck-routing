@@ -25,6 +25,12 @@ def test_then_fewest_high_miles():
     assert rank(routes) == [1, 0]
 
 
+def test_high_miles_decide_before_average_risk():
+    # fewer High miles wins even with more Moderate miles (a higher average)
+    routes = [risk(high=50, average=0.4), risk(high=10, average=1.5)]
+    assert rank(routes) == [1, 0]
+
+
 def test_then_lowest_average_risk():
     routes = [risk(average=1.2), risk(average=0.8, seconds=99_000)]
     assert rank(routes) == [1, 0]

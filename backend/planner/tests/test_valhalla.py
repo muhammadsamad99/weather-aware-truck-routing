@@ -1,4 +1,6 @@
 import json
+import threading
+import time
 from itertools import pairwise
 from pathlib import Path
 
@@ -10,12 +12,14 @@ from planner.providers.valhalla import (
     LEG_LIMIT_MI,
     MAX_SPUR_MI,
     TARE_LB,
+    Throttle,
     ValhallaProvider,
     join,
     longest_spur,
     overlap,
     parse_trip,
 )
+from planner.tests.fakes import FakeResponse
 
 FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "valhalla_springfield_peoria.json").read_text())
 
@@ -46,21 +50,11 @@ def line(start, bearing, miles, step=1.0):
     return [offset_point(start, bearing, k * step) for k in range(int(miles / step) + 1)]
 
 
-class FakeResponse:
-    def __init__(self, status, data):
-        self.status_code, self._data = status, data
-
-    def json(self):
-        if self._data is None:
-            raise ValueError("no JSON")
-        return self._data
-
-
 class FakeSession:
     def __init__(self, responder):
         self.responder, self.calls, self.headers = responder, [], {}
 
-    def post(self, url, json, timeout):
+    def post(self, url, json, timeout, stream=False):
         self.calls.append(json)
         return self.responder(json)
 
@@ -248,3 +242,81 @@ def test_legs_that_carry_straight_on_are_joined_untouched():
     joined = join([a, b])
     assert len(joined.points) == len(a.points) + len(b.points) - 1
     assert joined.total_seconds == pytest.approx(3600)
+
+
+def test_answers_in_an_unexpected_shape_are_routing_errors():
+    for data in ([1, 2], {"trip": {"legs": [{"shape": "??"}]}}, {"trip": "no"}):
+        with pytest.raises(RoutingError):
+            provider(lambda body, d=data: FakeResponse(200, d))._request([(1.0, 2.0), (3.0, 4.0)], 10_000, 0)
+
+
+def test_an_alternate_much_slower_than_the_best_route_is_dropped():
+    start = (40.0, -90.0)
+    north = line(start, 0, 60)
+    east_then_north = line(start, 90, 30) + line(offset_point(start, 90, 30), 0, 60)[1:]
+    data = {"trip": trip(north, 3600), "alternates": [{"trip": trip(east_then_north, 3600 * 1.7)}]}
+
+    def respond(body):
+        return FakeResponse(200, data) if "alternates" in body else FakeResponse(400, {"error": "no detours"})
+
+    assert len(provider(respond).routes(start, north[-1], 20_000)) == 1
+
+
+def test_the_legs_of_a_long_trip_are_joined_in_order():
+    start = (35.0, -118.0)
+    far = offset_point(start, 90, LEG_LIMIT_MI * 2.5)
+
+    def respond(body):
+        a = (body["locations"][0]["lat"], body["locations"][0]["lon"])
+        b = (body["locations"][-1]["lat"], body["locations"][-1]["lon"])
+        pts = [(a[0] + (b[0] - a[0]) * k / 50, a[1] + (b[1] - a[1]) * k / 50) for k in range(51)]
+        return FakeResponse(200, {"trip": trip(pts, haversine_mi(a, b) / 55 * 3600)})
+
+    route = provider(respond).routes(start, far, 30_000, count=1)[0]
+    assert all(b[1] >= a[1] for a, b in pairwise(route.points))  # heading east the whole way
+    assert all(b >= a for a, b in pairwise(route.seconds))
+
+
+def test_requests_are_spaced_by_the_throttle_across_threads():
+    now, slept = [100.0], []
+
+    def sleep(seconds):
+        slept.append(round(seconds, 3))
+        now[0] += seconds
+
+    throttle = Throttle(1.0, clock=lambda: now[0], sleep=sleep)
+    for _ in range(3):
+        throttle.wait()
+    assert slept == [1.0, 1.0]  # the first goes at once, each later one a second after the last
+    now[0] += 5
+    throttle.wait()
+    assert slept == [1.0, 1.0]  # after a pause there is nothing to wait for
+
+    turns = []
+
+    def slow_clock():  # holds each caller between reading the next free slot and claiming it
+        time.sleep(0.02)
+        return time.monotonic()
+
+    shared = Throttle(0.05, clock=slow_clock)
+    threads = [threading.Thread(target=lambda: (shared.wait(), turns.append(time.monotonic()))) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    turns.sort()
+    assert all(b - a >= 0.045 for a, b in pairwise(turns))
+
+
+def test_every_request_to_the_server_takes_a_turn():
+    waits = []
+
+    class Counting(Throttle):
+        def wait(self):
+            waits.append(1)
+
+    p = ValhallaProvider("https://valhalla.example", "test-agent", sleep=lambda s: None, throttle=Counting(1.0),
+                         session=FakeSession(lambda body: FakeResponse(503, {"error": "busy"})))
+    with pytest.raises(RoutingError):
+        p._request([(1.0, 2.0), (3.0, 4.0)], 10_000, 0)
+    assert len(waits) == 2  # the retry waits its turn too

@@ -23,10 +23,14 @@ INSTALLED_APPS = [
     "planner",
 ]
 
+# No sessions, cookies or logins: the API keeps no state and changes nothing on the server, so there is
+# nothing for cross-site request forgery to abuse, and the CSRF middleware is left out.
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
+    "django.middleware.gzip.GZipMiddleware",  # API answers only; WhiteNoise serves the app pre-compressed
     "django.middleware.common.CommonMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -44,12 +48,18 @@ TEMPLATES = [
 # The app keeps no data of its own: routes and forecasts are fetched per request and cached.
 DATABASES = {}
 
+# Sized for a 512 MB instance: a forecast series is about 10 KB and a cached trip's routes 1-3 MB.
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-        "LOCATION": "weather-aware-truck-routing",
-        "OPTIONS": {"MAX_ENTRIES": 20000},
-    }
+        "LOCATION": "forecasts-and-places",
+        "OPTIONS": {"MAX_ENTRIES": 6000},
+    },
+    "routes": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "routes",
+        "OPTIONS": {"MAX_ENTRIES": 40},
+    },
 }
 
 REST_FRAMEWORK = {
@@ -72,12 +82,43 @@ WHITENOISE_INDEX_FILE = True
 # Vite puts a content hash in every asset's name, so those can be cached for good.
 WHITENOISE_IMMUTABLE_FILE_TEST = r"^/assets/.+-[A-Za-z0-9_-]{8}\.(?:js|css)$"
 
+# The app's page may load scripts only from this site, map tiles, fonts and sprites only from OpenFreeMap,
+# and may not be framed. MapLibre draws on workers made from blob: URLs.
+MAP_HOST = "https://tiles.openfreemap.org"
+CONTENT_SECURITY_POLICY = "; ".join([
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    f"img-src 'self' data: blob: {MAP_HOST}",
+    f"connect-src 'self' {MAP_HOST}",
+    "worker-src 'self' blob:",
+    "child-src blob:",
+    "font-src 'self'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+])
+
+
+def _page_headers(headers, path, url):
+    if path.endswith(".html"):
+        headers["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
+        headers["X-Frame-Options"] = "DENY"
+        headers["Referrer-Policy"] = "same-origin"
+    headers["X-Content-Type-Options"] = "nosniff"
+
+
+WHITENOISE_ADD_HEADERS_FUNCTION = _page_headers
+
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_CONTENT_TYPE_NOSNIFF = True
 
 # Third-party services. Each one is a public endpoint; override them to point at your own instances.
 ROUTING_PROVIDER = os.environ.get("ROUTING_PROVIDER", "valhalla")
 VALHALLA_URL = os.environ.get("VALHALLA_URL", "https://valhalla1.openstreetmap.de")
+# The public server's usage policy (FOSSGIS): at most one request per second. Set 0 for your own server.
+VALHALLA_MIN_INTERVAL_SECONDS = float(os.environ.get("VALHALLA_MIN_INTERVAL_SECONDS", "1.0"))
 HERE_API_KEY = os.environ.get("HERE_API_KEY", "")
 OPEN_METEO_URL = os.environ.get("OPEN_METEO_URL", "https://api.open-meteo.com/v1/forecast")
 PHOTON_URL = os.environ.get("PHOTON_URL", "https://photon.komoot.io/api/")

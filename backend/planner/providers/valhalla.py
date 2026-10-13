@@ -14,18 +14,22 @@ occasionally carry a spur too, so any candidate still running back over itself f
 dropped. Near the two ends a loop back can be genuine (reaching a stop on the far side of a divided road), so
 the first and last SPUR_END_MARGIN_MI are not checked.
 
-The public Valhalla server refuses a request whose locations are more than 1,500 km apart in a straight
+The public Valhalla server is run by FOSSGIS, whose usage policy asks for at most one request per second,
+so every request waits its turn in a process-wide Throttle (`VALHALLA_MIN_INTERVAL_SECONDS` to change it for
+your own server). It also refuses a request whose locations are more than 1,500 km apart in a straight
 line. Longer trips, and every detour, are therefore routed as a chain of legs, each under LEG_LIMIT_MI,
 through points on the great circle between the ends, and the legs are joined into one route.
 """
 import logging
 import math
+import threading
 import time
 from itertools import pairwise
 
 import requests
 
 from ..geo import bearing_deg, cumulative_miles, decode_polyline, haversine_mi, intermediate_point, offset_point
+from ..http import SlowResponse, read_json
 from .base import RouteOption, RoutingError
 
 log = logging.getLogger(__name__)
@@ -35,7 +39,7 @@ LB_TO_METRIC_TON = 0.00045359237
 # how far to push the waypoint, as a share of the best route's length; 0.18 only if the others were dropped
 DETOUR_FRACTIONS = (0.12, 0.25, 0.18)
 DETOUR_MIN_MI, DETOUR_MAX_MI = 5.0, 150.0
-MAX_DETOUR_TIME_RATIO = 1.6  # drop a detour that takes 60% longer than the best route
+MAX_DETOUR_TIME_RATIO = 1.6  # drop any other route that takes 60% longer than the best one
 MAX_OVERLAP = 0.8  # drop a route whose roads are 80% or more the same as one already kept
 MAX_SPUR_MI = 3.0  # drop a route that runs back over its own road for longer than this
 SPUR_END_MARGIN_MI = 10.0
@@ -46,16 +50,37 @@ RETRY_STATUSES = (429, 502, 503, 504)  # a busy public server; worth one more tr
 RETRY_DELAY_SECONDS = 1.5
 
 
+class Throttle:
+    """Spaces requests at least `interval` seconds apart, across every thread of the process."""
+
+    def __init__(self, interval: float, clock=time.monotonic, sleep=time.sleep):
+        self.interval, self.clock, self.sleep = interval, clock, sleep
+        self._lock = threading.Lock()
+        self._next = 0.0
+
+    def wait(self) -> None:
+        if self.interval <= 0:
+            return
+        with self._lock:  # take a turn: the next caller's slot starts `interval` after this one's
+            free_from = self._next
+            now = self.clock()
+            start = max(now, free_from)
+            self._next = start + self.interval
+        if start > now:
+            self.sleep(start - now)
+
+
 class ValhallaProvider:
     name = "valhalla"
 
     def __init__(self, base_url: str, user_agent: str, timeout: float = 20.0, session: requests.Session | None = None,
-                 sleep=time.sleep):
+                 sleep=time.sleep, throttle: "Throttle | None" = None):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.session = session or requests.Session()
         self.session.headers.update({"User-Agent": user_agent})
         self.sleep = sleep
+        self.throttle = throttle or Throttle(0)
 
     def routes(self, origin, destination, load_lb, count=3):
         if haversine_mi(origin, destination) <= LEG_LIMIT_MI:
@@ -67,7 +92,7 @@ class ValhallaProvider:
         primary = found[0]
         kept = [primary]
         for option in found[1:]:
-            if self._usable(option, kept):
+            if self._usable(option, kept, primary):
                 kept.append(option)
         for fraction in DETOUR_FRACTIONS:
             for side in (90, -90):
@@ -80,15 +105,16 @@ class ValhallaProvider:
                     log.info("detour via %s skipped: %s", via, err)
                     continue
                 for option in candidates:
-                    if option.total_seconds <= MAX_DETOUR_TIME_RATIO * primary.total_seconds and self._usable(
-                            option, kept):
+                    if self._usable(option, kept, primary):
                         kept.append(option)
         return [RouteOption(name=f"Route {chr(65 + i)}", points=r.points, miles=r.miles, seconds=r.seconds,
                             provider=self.name) for i, r in enumerate(kept[:count])]
 
     @staticmethod
-    def _usable(option: RouteOption, kept: list[RouteOption]) -> bool:
-        """Not mostly the same road as a route already kept, and no spur."""
+    def _usable(option: RouteOption, kept: list[RouteOption], primary: RouteOption) -> bool:
+        """Not much slower than the best route, not mostly the same road as a route already kept, and no spur."""
+        if option.total_seconds > MAX_DETOUR_TIME_RATIO * primary.total_seconds:
+            return False
         if any(overlap(option, other) >= MAX_OVERLAP for other in kept):
             return False
         spur = longest_spur(option)
@@ -121,25 +147,33 @@ class ValhallaProvider:
         if alternates:
             body["alternates"] = alternates
         data = self._post(body)
-        trips = [data["trip"]] + [alt["trip"] for alt in data.get("alternates", []) if "trip" in alt]
-        return [parse_trip(trip) for trip in trips]
+        try:
+            trips = [data["trip"]] + [alt["trip"] for alt in data.get("alternates", []) if "trip" in alt]
+            return [parse_trip(trip) for trip in trips]
+        except (KeyError, TypeError, IndexError, ValueError) as err:
+            raise RoutingError(f"The routing service sent a route in an unexpected shape ({err!r}).") from err
 
     def _post(self, body: dict) -> dict:
         for attempt in (1, 2):
+            self.throttle.wait()
             try:
-                resp = self.session.post(f"{self.base_url}/route", json=body, timeout=self.timeout)
+                resp = self.session.post(f"{self.base_url}/route", json=body, timeout=self.timeout, stream=True)
             except requests.RequestException as err:
                 raise RoutingError(f"The routing service could not be reached ({type(err).__name__}).") from err
             if resp.status_code in RETRY_STATUSES and attempt == 1:
+                resp.close()
                 log.info("routing service busy (HTTP %s), retrying once", resp.status_code)
                 self.sleep(RETRY_DELAY_SECONDS)
                 continue
             try:
-                data = resp.json()
+                data = read_json(resp)
+            except (SlowResponse, requests.RequestException) as err:
+                raise RoutingError(f"The routing service did not answer in time ({err}).") from err
             except ValueError as err:
                 raise RoutingError(f"The routing service answered HTTP {resp.status_code} without JSON.") from err
-            if resp.status_code != 200 or "trip" not in data:
-                raise RoutingError(data.get("error") or f"The routing service answered HTTP {resp.status_code}.")
+            if resp.status_code != 200 or not isinstance(data, dict) or "trip" not in data:
+                error = data.get("error") if isinstance(data, dict) else None
+                raise RoutingError(error or f"The routing service answered HTTP {resp.status_code}.")
             return data
         raise AssertionError("unreachable")
 

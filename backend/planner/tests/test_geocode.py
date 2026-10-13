@@ -1,7 +1,8 @@
 import pytest
 from django.core.cache import cache
 
-from planner.geocode import GeocodeError, Geocoder
+from planner.geocode import GeocodeError, Geocoder, PlaceNotFound
+from planner.tests.fakes import FakeResponse
 
 
 def feature(name, osm_key, osm_value, lon, lat, state="Missouri"):
@@ -18,24 +19,13 @@ ST_LOUIS = [
 ]
 
 
-class FakeResponse:
-    def __init__(self, data):
-        self.data = data
-
-    def raise_for_status(self):
-        pass
-
-    def json(self):
-        return self.data
-
-
 class FakeSession:
     def __init__(self, features):
         self.features, self.headers, self.calls = features, {}, []
 
-    def get(self, url, params, timeout):
+    def get(self, url, params, timeout, stream=False):
         self.calls.append(params)
-        return FakeResponse({"features": self.features[:params["limit"]]})
+        return FakeResponse(200, {"features": self.features[:params["limit"]]})
 
 
 @pytest.fixture(autouse=True)
@@ -66,7 +56,7 @@ def test_typed_coordinates_need_no_lookup():
 
 
 def test_no_match_is_an_error():
-    with pytest.raises(GeocodeError, match="No place matches"):
+    with pytest.raises(PlaceNotFound, match="No place matches"):
         geocoder([]).first("zzqqxxv")
 
 
@@ -75,3 +65,21 @@ def test_results_are_cached():
     g.search("St. Louis, MO")
     g.first("st. louis, mo")
     assert len(g.session.calls) == 1
+
+
+class AnswerSession(FakeSession):
+    def __init__(self, status, data):
+        super().__init__([])
+        self.status, self.data = status, data
+
+    def get(self, url, params, timeout, stream=False):
+        self.calls.append(params)
+        return FakeResponse(self.status, self.data)
+
+
+def test_a_failing_place_service_is_not_reported_as_no_match():
+    for status, data in ((503, {"message": "down"}), (200, ["not", "an", "object"]), (200, None)):
+        g = Geocoder("https://photon.example/api/", "test-agent", session=AnswerSession(status, data))
+        with pytest.raises(GeocodeError) as caught:
+            g.first("Boise")
+        assert not isinstance(caught.value, PlaceNotFound)

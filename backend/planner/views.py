@@ -5,10 +5,10 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from . import service
-from .geocode import GeocodeError, Place
+from .geocode import GeocodeError, Place, PlaceNotFound
 from .providers.base import RoutingError
 from .serializers import PlanRequestSerializer
-from .weather import WeatherError
+from .weather import ForecastRangeError, WeatherError
 
 log = logging.getLogger(__name__)
 
@@ -43,9 +43,11 @@ def plan(request):
         trip = service.TripRequest(origin=origin, destination=destination, departure=data["departure"],
                                    load_lb=data["load_lb"], interval_mi=int(data["interval_mi"]))
         return Response(service.plan_trip(trip))
-    except GeocodeError as err:
+    except PlaceNotFound as err:
         return Response({"error": str(err)}, status=400)
-    except (RoutingError, WeatherError) as err:
+    except ForecastRangeError as err:
+        return Response({"error": str(err), "fields": {"departure": [str(err)]}}, status=400)
+    except (GeocodeError, RoutingError, WeatherError) as err:
         log.warning("plan failed: %s", err)
         return Response({"error": str(err)}, status=502)
 

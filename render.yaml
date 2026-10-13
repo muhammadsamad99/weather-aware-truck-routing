@@ -7,7 +7,8 @@ services:
     buildCommand: ./build.sh
     # One process, so the in-memory route and forecast caches are shared by every request;
     # threads, because a plan spends its time waiting on the routing and weather services.
-    startCommand: gunicorn --chdir backend config.wsgi:application --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 60
+    # A long trip can take about a minute when it waits its turn at the routing and weather services.
+    startCommand: gunicorn --chdir backend config.wsgi:application --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 120
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:

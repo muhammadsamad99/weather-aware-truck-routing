@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 import requests
 from django.conf import settings
-from django.core.cache import cache
+from django.core.cache import caches
 from requests.adapters import HTTPAdapter
 
 from .checkpoints import checkpoints
@@ -16,10 +16,10 @@ from .geo import haversine_mi
 from .geocode import Geocoder, Place
 from .heatmap import Corridor, corridor_points
 from .providers.base import RouteOption, RoutingError, RoutingProvider
-from .providers.valhalla import ValhallaProvider
+from .providers.valhalla import Throttle, ValhallaProvider
 from .recommend import rank, reason, route_risk
 from .risk import LEVEL_NAMES, assess
-from .weather import Forecasts, hour_floor
+from .weather import GRID_DEG, PER_MINUTE, Forecasts, MinuteQuota, hour_floor
 
 log = logging.getLogger(__name__)
 
@@ -43,10 +43,14 @@ _session = requests.Session()
 _session.mount("https://", HTTPAdapter(pool_connections=8, pool_maxsize=32))  # 8 threads x 4 forecast requests
 
 
+# Shared by every request, so the whole service keeps to the routing server's request rate.
+_valhalla_throttle = Throttle(settings.VALHALLA_MIN_INTERVAL_SECONDS)
+
+
 def make_provider() -> RoutingProvider:
     if settings.ROUTING_PROVIDER == "valhalla":
         return ValhallaProvider(settings.VALHALLA_URL, settings.HTTP_USER_AGENT, settings.HTTP_TIMEOUT_SECONDS,
-                                session=_session)
+                                session=_session, throttle=_valhalla_throttle)
     if settings.ROUTING_PROVIDER == "here":
         from .providers.here import HereProvider
 
@@ -58,8 +62,13 @@ def make_geocoder() -> Geocoder:
     return Geocoder(settings.PHOTON_URL, settings.HTTP_USER_AGENT, settings.HTTP_TIMEOUT_SECONDS, session=_session)
 
 
+# Shared by every request, so plans in the same minute stay within the weather service's limit together.
+_weather_quota = MinuteQuota(PER_MINUTE)
+
+
 def make_forecasts() -> Forecasts:
-    return Forecasts(settings.OPEN_METEO_URL, settings.HTTP_USER_AGENT, settings.HTTP_TIMEOUT_SECONDS, session=_session)
+    return Forecasts(settings.OPEN_METEO_URL, settings.HTTP_USER_AGENT, settings.HTTP_TIMEOUT_SECONDS, session=_session,
+                     quota=_weather_quota)
 
 
 def plan_trip(trip: TripRequest, provider: RoutingProvider | None = None, forecasts: Forecasts | None = None) -> dict:
@@ -118,19 +127,21 @@ def plan_trip(trip: TripRequest, provider: RoutingProvider | None = None, foreca
         "recommended": results[best]["name"],
         "reason": reason(risks[best], risks[runner_up] if runner_up is not None else None),
         "levels": list(LEVEL_NAMES),
+        "weather_grid_deg": getattr(forecasts, "grid_deg", GRID_DEG),
         "heatmap": _heatmap(corridor, forecasts, trip),
     }
 
 
 def cached_routes(provider: RoutingProvider, origin, destination, load_lb: float) -> list[RouteOption]:
-    """Routes for the trip, from the cache when the same trip (places to ~10 m, load to 1,000 lb) was routed
-    in the last ROUTE_CACHE_SECONDS: routes don't change with the weather, so a re-plan only refetches that."""
+    """Routes for the trip, from the cache when the same trip (places to ~10 m, the same load) was routed in
+    the last ROUTE_CACHE_SECONDS: routes don't change with the weather, so a re-plan only refetches that."""
+    # the load is part of the key to the pound: the truck's weight decides which roads and bridges it may use
     key = "route:" + hashlib.sha256(repr((provider.name, [round(v, 4) for v in (*origin, *destination)],
-                                          round(load_lb, -3))).encode()).hexdigest()
-    routes = cache.get(key)
+                                          round(float(load_lb)))).encode()).hexdigest()
+    routes = caches["routes"].get(key)
     if routes is None:
         routes = provider.routes(origin, destination, load_lb, count=3)
-        cache.set(key, routes, ROUTE_CACHE_SECONDS)
+        caches["routes"].set(key, routes, ROUTE_CACHE_SECONDS)
     return routes
 
 

@@ -11,13 +11,19 @@ from dataclasses import dataclass
 import requests
 from django.core.cache import cache
 
+from .http import SlowResponse, read_json
+
 COORDS = re.compile(r"^\s*(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$")
 CACHE_SECONDS = 24 * 3600
 SEARCH_LIMIT = 5
 
 
 class GeocodeError(Exception):
-    pass
+    """The place service failed."""
+
+
+class PlaceNotFound(GeocodeError):
+    """The place service answered, and nothing matched."""
 
 
 @dataclass(frozen=True)
@@ -60,10 +66,12 @@ class Geocoder:
             return cached
         try:
             resp = self.session.get(self.base_url, params={"q": query, "limit": limit, "lang": "en"},
-                                    timeout=self.timeout)
-            resp.raise_for_status()
-            features = resp.json().get("features", [])
-        except (requests.RequestException, ValueError) as err:
+                                    timeout=self.timeout, stream=True)
+            if resp.status_code != 200:
+                resp.close()
+                raise GeocodeError(f"Place search failed (HTTP {resp.status_code}).")
+            features = read_json(resp).get("features", [])
+        except (requests.RequestException, SlowResponse, ValueError, AttributeError) as err:
             raise GeocodeError(f"Place search failed ({type(err).__name__}).") from err
         features = [f for f in features if f.get("geometry", {}).get("type") == "Point"]
         if not any(ch.isdigit() for ch in query):
@@ -77,7 +85,7 @@ class Geocoder:
         """The top suggestion, the same one the place box would show first."""
         places = self.search(query)
         if not places:
-            raise GeocodeError(f"No place matches '{query}'.")
+            raise PlaceNotFound(f"No place matches '{query}'.")
         return places[0]
 
 

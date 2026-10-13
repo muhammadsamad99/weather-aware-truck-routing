@@ -3,7 +3,18 @@ from datetime import UTC, date, datetime, timedelta
 import pytest
 from django.core.cache import cache
 
-from planner.weather import BATCH, Forecasts, WeatherError, grid_key, parse_hourly
+from planner.tests.fakes import FakeResponse
+from planner.weather import (
+    BATCH,
+    GRID_DEG,
+    MAX_PLACES,
+    Forecasts,
+    MinuteQuota,
+    WeatherError,
+    grid_for,
+    grid_key,
+    parse_hourly,
+)
 
 T0 = datetime(2026, 10, 14, 0, 0, tzinfo=UTC)
 
@@ -20,20 +31,12 @@ def series_item(hours=72, wind=10.0, rain=0.0, showers=0.0, snow=0.0, units=None
     }
 
 
-class FakeResponse:
-    def __init__(self, status, data):
-        self.status_code, self._data = status, data
-
-    def json(self):
-        return self._data
-
-
 class FakeSession:
     def __init__(self, make_item=None, status=200, data=None):
         self.calls, self.headers = [], {}
         self.make_item, self.status, self.data = make_item or (lambda lat, lon: series_item()), status, data
 
-    def get(self, url, params, timeout):
+    def get(self, url, params, timeout, stream=False):
         self.calls.append(params)
         if self.data is not None:
             return FakeResponse(self.status, self.data)
@@ -111,3 +114,73 @@ def test_departures_beyond_the_forecast_range_are_refused():
     far = datetime.now(UTC).date() + timedelta(days=30)
     with pytest.raises(WeatherError, match="two weeks"):
         forecasts(FakeSession()).load([(40.0, -90.0)], far, far)
+
+
+def test_a_long_trip_widens_the_grid_to_stay_within_the_location_budget():
+    # a checkpoint every ~7 mi across the country: far more 0.1-degree cells than the budget
+    places = [(38.0 + 0.0001 * i, -120.0 + 0.1 * i) for i in range(MAX_PLACES * 2)]
+    session = FakeSession()
+    f = forecasts(session)
+    f.load(places, T0.date(), T0.date() + timedelta(days=2))
+    assert f.grid_deg > GRID_DEG
+    asked = sum(len(c["latitude"].split(",")) for c in session.calls)
+    assert asked <= MAX_PLACES
+    for lat, lon in places:
+        f.at(lat, lon, T0 + timedelta(hours=3))  # every place has a forecast on the wider grid
+
+
+def test_a_trip_within_the_budget_keeps_the_fine_grid():
+    assert grid_for([(40.0 + 0.1 * i, -90.0) for i in range(100)]) == GRID_DEG
+
+
+def test_a_forecast_in_an_unexpected_shape_is_a_weather_error():
+    for data in ([{"hourly_units": {"wind_speed_10m": "mp/h", "rain": "inch", "snowfall": "inch"}}], ["x"]):
+        with pytest.raises(WeatherError, match="unexpected shape"):
+            forecasts(FakeSession(data=data)).load([(40.0, -90.0)], T0.date(), T0.date())
+
+
+class FakeClock:
+    def __init__(self):
+        self.now, self.slept = 1000.0, []
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.slept.append(round(seconds, 1))
+        self.now += seconds
+
+
+def test_plans_in_the_same_minute_wait_for_the_quota_to_free_up():
+    clock = FakeClock()
+    quota = MinuteQuota(560, clock=clock, sleep=clock.sleep)
+    quota.take(450)
+    clock.now += 20
+    quota.take(100)  # 550 in the minute: fits
+    assert clock.slept == []
+    quota.take(300)  # waits until the first 450 are a minute old
+    assert clock.slept == [40.0]
+
+
+def test_a_quota_that_would_need_too_long_a_wait_fails_quickly_and_clearly():
+    clock = FakeClock()
+    quota = MinuteQuota(560, clock=clock, sleep=clock.sleep)
+    quota.take(560)
+    with pytest.raises(WeatherError, match="per-minute limit"):
+        quota.take(100, max_wait=10)
+    assert clock.slept == []
+
+
+def test_forecasts_take_from_the_quota_only_what_they_fetch():
+    taken = []
+
+    class Recording(MinuteQuota):
+        def take(self, n, max_wait=0):
+            taken.append(n)
+
+    f = Forecasts("https://weather.example", "test-agent", session=FakeSession(), quota=Recording(560))
+    places = [(40.0 + 0.1 * i, -90.0) for i in range(30)]
+    f.load(places, T0.date(), T0.date())
+    f2 = Forecasts("https://weather.example", "test-agent", session=FakeSession(), quota=Recording(560))
+    f2.load(places, T0.date(), T0.date())  # all cached now
+    assert taken == [30]
