@@ -146,7 +146,7 @@ Decisions where the brief leaves room:
 - **The order is applied as written, and its cost in time is shown.** The brief asks for a balance of risk
   and time, then gives the order: Severe miles, High miles, average risk, travel time. The app applies that
   order as written rather than inventing its own weighting. Two things keep the balance visible and bounded:
-  - Routes more than 1.6× the fastest route's time are never offered.
+  - Routes that take more than 1.6× the time of Valhalla's best route are never offered.
   - When the recommended route isn't the fastest, the panel says what the extra time buys, for example
     "4 h 02 min longer than Route A, the fastest route, for lower average risk (0.08 vs 0.17)". The driver
     can then pick the faster card.
@@ -207,7 +207,7 @@ cd backend && pytest && ruff check .
 cd frontend && npm run lint && npx tsc -b && npm test
 ```
 
-CI runs all of these on every push and pull request (`.github/workflows/ci.yml`).
+CI runs all of these on every push to `main` and on every pull request (`.github/workflows/ci.yml`).
 
 The backend tests (142) cover:
 
@@ -288,7 +288,7 @@ frontend/src/
   api.ts, types.ts        the API and its response shapes
   geometry.ts             the truck's position at an hour, map bounds
 render.yaml, build.sh     deployment
-.github/workflows/ci.yml  tests, lint, type check and build on every push
+.github/workflows/ci.yml  tests, lint, type check and build on pushes to main and on pull requests
 ```
 
 ## Known limitations
