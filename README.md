@@ -150,6 +150,9 @@ Decisions where the brief leaves room:
   - When the recommended route isn't the fastest, the panel says what the extra time buys, for example
     "4 h 02 min longer than Route A, the fastest route, for lower average risk (0.08 vs 0.17)". The driver
     can then pick the faster card.
+  - Risk figures are compared at the precision the panel shows them (whole miles, average risk to two
+    decimals), so a difference too small to see never decides the ranking, and a reason never reads
+    "0.16 vs 0.16".
 - **Truck weight.** Valhalla is given the gross weight: 35,000 lb tare plus the load.
 - **Time zones.** Times are sent in UTC and shown in the browser's time zone.
 - **Departure window.** A departure from an hour ago up to 14 days ahead is accepted, which is what the
@@ -206,7 +209,7 @@ cd frontend && npm run lint && npx tsc -b && npm test
 
 CI runs all of these on every push and pull request (`.github/workflows/ci.yml`).
 
-The backend tests (138) cover:
+The backend tests (141) cover:
 
 - **Risk table:** every edge and every load rule.
 - **Ranking:** each step of the recommendation order, its reason messages and the trade-off line.

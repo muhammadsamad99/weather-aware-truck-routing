@@ -85,3 +85,41 @@ def test_the_tradeoff_gives_only_the_time_when_the_reason_already_compares_with_
 def test_no_tradeoff_when_the_recommended_route_is_as_fast():
     assert tradeoff(risk(seconds=36_000), risk(seconds=36_000), "Route A") is None
     assert tradeoff(risk(seconds=36_020), risk(seconds=36_000), "Route A") is None  # under a minute
+
+
+def test_differences_too_small_to_show_never_decide():
+    # the same 100 Moderate miles on a 640 mi and a 633 mi route: averages 0.156 and 0.158 read 0.16 on both
+    # cards, so the faster route must win on time, not the longer one on an average diluted by its extra miles
+    longer = route_risk([0, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 640],
+                        [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], total_seconds=36_000)
+    shorter = route_risk([0, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 633],
+                         [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0], total_seconds=33_000)
+    assert (longer.average, shorter.average) == (0.156, 0.158)
+    assert rank([longer, shorter]) == [1, 0]
+    assert rank([risk(high=12.6, seconds=36_000), risk(high=12.9, seconds=33_000)]) == [1, 0]  # both read 13 mi
+
+
+def test_every_reason_and_tradeoff_shows_the_difference_it_names():
+    import random
+    import re
+
+    rng = random.Random(7)
+    pair = re.compile(r"\(([^()]*?) vs ([^()]*?)\)")
+    checked = 0
+    for _ in range(4000):
+        a, b = (risk(severe=rng.choice([0, rng.uniform(0, 30)]), high=rng.choice([0, rng.uniform(0, 30)]),
+                     average=rng.uniform(0, 1), seconds=rng.uniform(30_000, 40_000),
+                     no_travel=rng.choice([0, 0, rng.uniform(0, 2)])) for _ in range(2))
+        best, other = (a, b) if rank([a, b]) == [0, 1] else (b, a)
+        fastest = min((best, other), key=lambda r: r.total_seconds)
+        for text in (reason(best, other), tradeoff(best, fastest, "Route A") or ""):
+            for left, right in pair.findall(text):
+                checked += 1
+                assert left != right, text
+    assert checked > 1000
+
+
+def test_a_stretch_under_a_mile_is_not_called_zero_miles():
+    for under_a_mile in (0.3, 0.5):
+        assert reason(risk(), risk(no_travel=under_a_mile)) == (
+            "The other routes cross No Travel weather (under 1 mi on the next best).")
