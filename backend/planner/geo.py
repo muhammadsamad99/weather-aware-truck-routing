@@ -62,3 +62,17 @@ def bearing_deg(a: tuple[float, float], b: tuple[float, float]) -> float:
     y = math.sin(lon2 - lon1) * math.cos(lat2)
     x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(lon2 - lon1)
     return (math.degrees(math.atan2(y, x)) + 360) % 360
+
+
+def intermediate_point(a: tuple[float, float], b: tuple[float, float], fraction: float) -> tuple[float, float]:
+    """The point `fraction` of the way from a to b along the great circle."""
+    lat1, lon1 = map(math.radians, a)
+    lat2, lon2 = map(math.radians, b)
+    d = haversine_mi(a, b) / EARTH_RADIUS_MI
+    if d == 0:
+        return a
+    A, B = math.sin((1 - fraction) * d) / math.sin(d), math.sin(fraction * d) / math.sin(d)
+    x = A * math.cos(lat1) * math.cos(lon1) + B * math.cos(lat2) * math.cos(lon2)
+    y = A * math.cos(lat1) * math.sin(lon1) + B * math.cos(lat2) * math.sin(lon2)
+    z = A * math.sin(lat1) + B * math.sin(lat2)
+    return math.degrees(math.atan2(z, math.hypot(x, y))), math.degrees(math.atan2(y, x))
