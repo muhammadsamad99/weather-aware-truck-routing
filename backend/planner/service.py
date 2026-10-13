@@ -10,7 +10,7 @@ from django.core.cache import cache
 from .checkpoints import checkpoints
 from .geo import haversine_mi
 from .geocode import Geocoder, Place
-from .heatmap import corridor_points
+from .heatmap import Corridor, corridor_points
 from .providers.base import RouteOption, RoutingError, RoutingProvider
 from .providers.valhalla import ValhallaProvider
 from .recommend import rank, reason, route_risk
@@ -58,11 +58,11 @@ def plan_trip(trip: TripRequest, provider: RoutingProvider | None = None, foreca
     routes = cached_routes(provider, origin, destination, trip.load_lb)
 
     route_cps = [checkpoints(r, trip.interval_mi, trip.departure) for r in routes]
-    grid = corridor_points([r.points for r in routes])
+    corridor = corridor_points([r.points for r in routes])
     last_eta = max(cps[-1].eta for cps in route_cps)
     start = hour_floor(trip.departure)
     end = max(last_eta, start + timedelta(hours=HEATMAP_HOURS)) + timedelta(hours=1)
-    forecasts.load([(c.lat, c.lon) for cps in route_cps for c in cps] + grid, start.date(), end.date())
+    forecasts.load([(c.lat, c.lon) for cps in route_cps for c in cps] + corridor.points, start.date(), end.date())
 
     results, risks = [], []
     for route, cps in zip(routes, route_cps, strict=True):
@@ -100,7 +100,7 @@ def plan_trip(trip: TripRequest, provider: RoutingProvider | None = None, foreca
         "recommended": results[best]["name"],
         "reason": reason(risks[best], risks[runner_up] if runner_up is not None else None),
         "levels": list(LEVEL_NAMES),
-        "heatmap": _heatmap(grid, forecasts, trip),
+        "heatmap": _heatmap(corridor, forecasts, trip),
     }
 
 
@@ -152,19 +152,20 @@ def _thin(route: RouteOption) -> list[list[float]]:
     return out
 
 
-def _heatmap(grid, forecasts: Forecasts, trip: TripRequest) -> dict:
+def _heatmap(corridor: Corridor, forecasts: Forecasts, trip: TripRequest) -> dict:
     """The risk level at each corridor point for each hour from departure to departure + 48 h."""
     frames = []
     for k in range(HEATMAP_HOURS + 1):
         moment = trip.departure + timedelta(hours=k)
         frame = []
-        for lat, lon in grid:
+        for lat, lon in corridor.points:
             wx = forecasts.at(lat, lon, moment)
             frame.append(assess(wx.wind_mph, wx.rain_in_hr, wx.snow_in_hr, trip.load_lb).level)
         frames.append(frame)
     return {
         "start": _iso(trip.departure),
         "hours": HEATMAP_HOURS,
-        "points": [[lon, lat] for lat, lon in grid],
+        "step_deg": corridor.step_deg,
+        "points": [[lon, lat] for lat, lon in corridor.points],
         "frames": frames,
     }

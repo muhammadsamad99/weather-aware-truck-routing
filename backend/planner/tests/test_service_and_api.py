@@ -109,6 +109,7 @@ def test_the_heatmap_has_one_frame_per_hour_for_48_hours():
     h = plan["heatmap"]
     assert h["hours"] == 48 and len(h["frames"]) == 49
     assert all(len(f) == len(h["points"]) for f in h["frames"])
+    assert h["step_deg"] > 0
     assert max(h["frames"][0]) == LOW and min(h["frames"][24]) == NO_TRAVEL
     assert plan["reason"] == "Only one route was found."
 

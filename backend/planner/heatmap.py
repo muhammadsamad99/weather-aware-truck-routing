@@ -4,6 +4,8 @@ The corridor is every point within CORRIDOR_MI of any route. Grid spacing starts
 widens until the corridor holds at most MAX_POINTS, so a long trip is covered as evenly as a short one
 and the forecast requests stay small.
 """
+from typing import NamedTuple
+
 from .geo import haversine_mi
 
 CORRIDOR_MI = 40.0
@@ -14,7 +16,12 @@ START_STEP_DEG = 0.2
 Point = tuple[float, float]
 
 
-def corridor_points(routes_points: list[tuple[Point, ...]], sample_mi: float = 10.0) -> list[Point]:
+class Corridor(NamedTuple):
+    points: list[Point]
+    step_deg: float  # grid spacing, in degrees of latitude and of longitude
+
+
+def corridor_points(routes_points: list[tuple[Point, ...]], sample_mi: float = 10.0) -> Corridor:
     samples = _samples(routes_points, sample_mi)
     lats = [p[0] for p in samples]
     lons = [p[1] for p in samples]
@@ -32,7 +39,7 @@ def corridor_points(routes_points: list[tuple[Point, ...]], sample_mi: float = 1
                 lon += step
             lat += step
         if len(grid) <= MAX_POINTS:
-            return grid
+            return Corridor(grid, round(step, 4))
         step *= 1.25
 
 
