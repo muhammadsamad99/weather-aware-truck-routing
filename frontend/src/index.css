@@ -64,6 +64,10 @@ input {
   font-size: 0.75rem;
 }
 
+.panel footer a {
+  color: inherit;
+}
+
 /* ---- form ---- */
 .trip-form {
   display: flex;
@@ -224,6 +228,7 @@ button.link {
 /* ---- status ---- */
 .status {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   color: var(--muted);
@@ -532,6 +537,12 @@ button.link {
 
 .heat-time {
   font-variant-numeric: tabular-nums;
+}
+
+.heat-spacing {
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 0.75rem;
 }
 
 .heat-slider {

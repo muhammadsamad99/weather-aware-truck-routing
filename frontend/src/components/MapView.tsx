@@ -177,7 +177,7 @@ export default function MapView({ plan, selected, hour, showHeatmap, focus, onSe
 
   return (
     <div className="map-wrap">
-      <div ref={container} className="map" aria-label="Map of the routes and the weather risk" />
+      <div ref={container} className="map" role="region" aria-label="Map of the routes and the weather risk" />
       {baseMapFailed && <div className="map-notice">The base map could not load; routes and weather still show.</div>}
     </div>
   )

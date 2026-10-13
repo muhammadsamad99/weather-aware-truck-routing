@@ -62,6 +62,7 @@ export interface Plan {
   recommended: string
   reason: string
   levels: LevelName[]
+  weather_grid_deg: number // 0.1 normally; wider on long trips, to stay within the forecast service's limits
   heatmap: Heatmap
 }
 

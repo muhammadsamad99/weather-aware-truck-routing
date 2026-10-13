@@ -102,6 +102,11 @@ export default function App() {
         {busy && (
           <div className="status" role="status">
             <span className="spinner" aria-hidden="true" /> Routing and checking the forecast… {elapsed} s
+            {elapsed >= 15 && (
+              <span className="hint">
+                Long trips take longer: the free routing and weather services are asked at a limited pace.
+              </span>
+            )}
           </div>
         )}
         {error && (
@@ -122,6 +127,12 @@ export default function App() {
                 <br />
                 Leaves {formatDateTime(plan.departure)} · {formatLoad(plan.load_lb)} · checked every {plan.interval_mi} mi
               </p>
+              {plan.weather_grid_deg > 0.1 && (
+                <p className="trip-summary">
+                  A long trip: the forecast is read on a {plan.weather_grid_deg}° grid (about{' '}
+                  {Math.round(plan.weather_grid_deg * 69)} mi) to stay within the weather service's limits.
+                </p>
+              )}
             </div>
             <RouteCards routes={plan.routes} selected={selected} onSelect={setSelected} />
             {selectedRoute && <CheckpointTable route={selectedRoute} intervalMi={plan.interval_mi} onFocus={onFocus} />}
@@ -130,7 +141,12 @@ export default function App() {
 
         <Legend />
         <footer>
-          Routes: Valhalla truck routing on OpenStreetMap · Weather: Open-Meteo · Places: Photon · Map: OpenFreeMap
+          Routes: <a href="https://valhalla.github.io/valhalla/">Valhalla</a> on the{' '}
+          <a href="https://www.fossgis.de/">FOSSGIS</a> server · Map data ©{' '}
+          <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> (
+          <a href="https://www.openstreetmap.org/fixthemap">fix the map</a>) · Weather data by{' '}
+          <a href="https://open-meteo.com/">Open-Meteo.com</a> · Places:{' '}
+          <a href="https://photon.komoot.io/">Photon</a> · Map: <a href="https://openfreemap.org/">OpenFreeMap</a>
         </footer>
       </aside>
 
@@ -147,6 +163,7 @@ export default function App() {
           <HeatmapControl
             start={plan.heatmap.start}
             hours={plan.heatmap.hours}
+            spacingMi={gridSpacingMi(plan)}
             hour={hour}
             onHour={setHour}
             visible={showHeatmap}
@@ -158,6 +175,14 @@ export default function App() {
       </main>
     </div>
   )
+}
+
+/** The heatmap grid's spacing in miles: [east-west, north-south] (a degree of longitude shrinks with latitude). */
+function gridSpacingMi(plan: Plan): [number, number] {
+  const lats = plan.heatmap.points.map((p) => p[1])
+  const midLat = lats.length ? (Math.min(...lats) + Math.max(...lats)) / 2 : 39
+  const northSouth = plan.heatmap.step_deg * 69
+  return [Math.round(northSouth * Math.cos((midLat * Math.PI) / 180)), Math.round(northSouth)]
 }
 
 function validate(form: TripFormValues): Record<string, string> {

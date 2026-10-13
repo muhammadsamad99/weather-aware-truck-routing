@@ -6,6 +6,7 @@ const PLAY_STEP_MS = 700
 interface Props {
   start: string
   hours: number
+  spacingMi: [number, number] // east-west, north-south
   hour: number
   onHour: (hour: number) => void
   visible: boolean
@@ -15,7 +16,8 @@ interface Props {
 }
 
 /** The 0-48 hour slider for the risk heatmap, with play/pause. */
-export default function HeatmapControl({ start, hours, hour, onHour, visible, onVisible, playing, onPlaying }: Props) {
+export default function HeatmapControl(props: Props) {
+  const { start, hours, spacingMi, hour, onHour, visible, onVisible, playing, onPlaying } = props
   useEffect(() => {
     if (!playing) return
     const timer = window.setInterval(() => onHour(hour >= hours ? 0 : hour + 1), PLAY_STEP_MS)
@@ -29,6 +31,9 @@ export default function HeatmapControl({ start, hours, hour, onHour, visible, on
         <label className="toggle">
           <input type="checkbox" checked={visible} onChange={(e) => onVisible(e.target.checked)} />
           Risk heatmap
+          <span className="heat-spacing" title="The heatmap is coarser than the checkpoints, which use the forecast where the truck is">
+            points {spacingMi[0] === spacingMi[1] ? spacingMi[0] : `${spacingMi[0]}–${spacingMi[1]}`} mi apart
+          </span>
         </label>
         <span className="heat-time" aria-live="polite">
           +{hour} h · {formatDateTime(moment)}

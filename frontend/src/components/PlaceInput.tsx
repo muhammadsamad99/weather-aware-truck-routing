@@ -71,6 +71,7 @@ export default function PlaceInput({ label, value, onChange, error, placeholder 
   }
 
   const listId = `${id}-list`
+  const errorId = `${id}-error`
   const showList = open && suggestions.length > 0
   return (
     <div className="field place-input">
@@ -82,11 +83,12 @@ export default function PlaceInput({ label, value, onChange, error, placeholder 
         placeholder={placeholder}
         value={value.text}
         aria-invalid={Boolean(error)}
+        aria-describedby={error ? errorId : undefined}
         role="combobox"
         aria-expanded={showList}
-        aria-controls={listId}
+        aria-controls={showList ? listId : undefined}
         aria-autocomplete="list"
-        aria-activedescendant={active >= 0 ? `${listId}-${active}` : undefined}
+        aria-activedescendant={showList && active >= 0 ? `${listId}-${active}` : undefined}
         onChange={(e) => {
           onChange({ text: e.target.value, place: null })
           setOpen(true)
@@ -119,7 +121,11 @@ export default function PlaceInput({ label, value, onChange, error, placeholder 
       )}
       {value.place && <div className="hint">{value.place.lat.toFixed(4)}, {value.place.lon.toFixed(4)}</div>}
       {!value.place && lookupFailed && <div className="hint">Suggestions are unavailable; the place will be looked up when you plan.</div>}
-      {error && <div className="field-error">{error}</div>}
+      {error && (
+        <div className="field-error" id={errorId}>
+          {error}
+        </div>
+      )}
     </div>
   )
 }

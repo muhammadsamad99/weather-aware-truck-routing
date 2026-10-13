@@ -45,9 +45,14 @@ export default function TripForm({ values, onChange, onSubmit, busy, fieldErrors
             type="datetime-local"
             value={values.departure}
             aria-invalid={Boolean(fieldErrors.departure)}
+            aria-describedby={fieldErrors.departure ? 'departure-error' : undefined}
             onChange={(e) => set('departure', e.target.value)}
           />
-          {fieldErrors.departure && <div className="field-error">{fieldErrors.departure}</div>}
+          {fieldErrors.departure && (
+            <div className="field-error" id="departure-error">
+              {fieldErrors.departure}
+            </div>
+          )}
         </div>
         <div className="field load">
           <label htmlFor="load">Load (lb)</label>
@@ -60,9 +65,14 @@ export default function TripForm({ values, onChange, onSubmit, busy, fieldErrors
             step={500}
             value={values.loadLb}
             aria-invalid={Boolean(fieldErrors.load_lb)}
+            aria-describedby={fieldErrors.load_lb ? 'load-error' : undefined}
             onChange={(e) => set('loadLb', e.target.value)}
           />
-          {fieldErrors.load_lb && <div className="field-error">{fieldErrors.load_lb}</div>}
+          {fieldErrors.load_lb && (
+            <div className="field-error" id="load-error">
+              {fieldErrors.load_lb}
+            </div>
+          )}
         </div>
       </div>
       <fieldset className="field interval">
