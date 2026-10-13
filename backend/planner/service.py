@@ -17,9 +17,9 @@ from .geocode import Geocoder, Place
 from .heatmap import Corridor, corridor_points
 from .providers.base import RouteOption, RoutingError, RoutingProvider
 from .providers.valhalla import Throttle, ValhallaProvider
-from .recommend import rank, reason, route_risk, tradeoff
+from .recommend import rank, reason, route_risk, shown, tradeoff
 from .risk import LEVEL_NAMES, assess
-from .weather import GRID_DEG, PER_MINUTE, Forecasts, MinuteQuota, WeatherError, hour_floor
+from .weather import GRID_DEG, PER_MINUTE, Forecasts, HourWeather, MinuteQuota, WeatherError, hour_floor
 
 log = logging.getLogger(__name__)
 
@@ -95,14 +95,13 @@ def plan_trip(trip: TripRequest, provider: RoutingProvider | None = None, foreca
     for route, cps in zip(routes, route_cps, strict=True):
         rows, levels = [], []
         for c in cps:
-            wx = forecasts.at(c.lat, c.lon, c.eta)
+            wx = as_shown(forecasts.at(c.lat, c.lon, c.eta))
             a = assess(wx.wind_mph, wx.rain_in_hr, wx.snow_in_hr, trip.load_lb)
             levels.append(a.level)
             rows.append({
                 "index": c.index, "mile": round(c.mile, 1), "lat": round(c.lat, 5), "lon": round(c.lon, 5),
                 "eta": _iso(c.eta),
-                "wind_mph": round(wx.wind_mph, 1), "rain_in_hr": round(wx.rain_in_hr, 3),
-                "snow_in_hr": round(wx.snow_in_hr, 3),
+                "wind_mph": wx.wind_mph, "rain_in_hr": wx.rain_in_hr, "snow_in_hr": wx.snow_in_hr,
                 "level": a.level, "level_name": a.name, "reasons": list(a.reasons),
             })
         risk = route_risk([c.mile for c in cps], levels, route.total_seconds)
@@ -184,6 +183,14 @@ def _thin(route: RouteOption) -> list[list[float]]:
     return out
 
 
+def as_shown(wx: HourWeather) -> HourWeather:
+    """A forecast reading at the precision the panel shows it, which is the brief's own: whole mph (its wind
+    bands are 25-34, 35-44 mph) and hundredths of an inch an hour. Checkpoints and the heatmap are rated on
+    these numbers, so a level always matches the numbers next to it: 34.6 mph reads 35 mph and rates High."""
+    return HourWeather(wind_mph=float(shown(wx.wind_mph)), rain_in_hr=float(shown(wx.rain_in_hr, 2)),
+                       snow_in_hr=float(shown(wx.snow_in_hr, 2)))
+
+
 def _heatmap(corridor: Corridor, forecasts: Forecasts, trip: TripRequest) -> dict:
     """The risk level at each corridor point for each hour from departure to departure + 48 h (None where the
     forecast has no value)."""
@@ -193,7 +200,7 @@ def _heatmap(corridor: Corridor, forecasts: Forecasts, trip: TripRequest) -> dic
         frame = []
         for lat, lon in corridor.points:
             try:
-                wx = forecasts.at(lat, lon, moment)
+                wx = as_shown(forecasts.at(lat, lon, moment))
             except WeatherError:
                 frame.append(None)  # no forecast there and then: left off the map rather than shown as Low
                 continue

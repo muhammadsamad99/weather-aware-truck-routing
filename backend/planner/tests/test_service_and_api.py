@@ -9,7 +9,7 @@ from planner import service
 from planner.geo import cumulative_miles, offset_point
 from planner.geocode import Place
 from planner.providers.base import RouteOption, RoutingError
-from planner.risk import HIGH, LOW, NO_TRAVEL
+from planner.risk import HIGH, LOW, MODERATE, NO_TRAVEL, SEVERE
 from planner.weather import ForecastRangeError, HourWeather, WeatherError
 
 DEPARTURE = (datetime.now(UTC) + timedelta(days=1)).replace(hour=11, minute=0, second=0, microsecond=0)
@@ -324,3 +324,19 @@ def test_framework_errors_use_the_api_error_shape():
     assert bad_json.status_code == 400 and set(bad_json.json()) == {"error"}
     wrong_method = c.get("/api/plan")
     assert wrong_method.status_code == 405 and set(wrong_method.json()) == {"error"}
+
+
+def test_a_checkpoint_is_rated_on_the_numbers_it_shows():
+    # the brief's wind bands are whole mph (25-34, 35-44) and its rain bands hundredths of an inch: 34.6 mph is
+    # shown as 35 and rated High, 0.249 in/hr is shown as 0.25 and rated High, and 1.004 is shown as 1.00 (Severe)
+    for reading, shown, level in ((HourWeather(34.6, 0, 0), (35.0, 0.0, 0.0), HIGH),
+                                  (HourWeather(34.4, 0, 0), (34.0, 0.0, 0.0), MODERATE),
+                                  (HourWeather(5, 0.249, 0), (5.0, 0.25, 0.0), HIGH),
+                                  (HourWeather(5, 1.004, 0), (5.0, 1.0, 0.0), SEVERE),
+                                  (HourWeather(5, 0, 0.496), (5.0, 0.0, 0.5), MODERATE)):
+        plan = service.plan_trip(trip(load=20_000), provider=FakeProvider([route("Route A", 0, 100)]),
+                                 forecasts=FakeForecasts(lambda lat, lon, moment, w=reading: w))
+        cp = plan["routes"][0]["checkpoints"][0]
+        assert (cp["wind_mph"], cp["rain_in_hr"], cp["snow_in_hr"]) == shown, reading
+        assert cp["level"] == level, reading
+        assert plan["heatmap"]["frames"][0][0] == level, reading  # the heatmap rates the same way

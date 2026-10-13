@@ -137,8 +137,11 @@ Decisions where the brief leaves room:
   the next one.
 - **No Travel thresholds.** For rain and snow these are strict, as the table writes them (> 1.00, > 3.0),
   so exactly 1.00 in/hr of rain is Severe. Wind No Travel is inclusive (≥ 55 mph).
-- **Values between the table's whole numbers.** The wind bands are whole numbers in the brief (25–34,
-  35–44). A forecast of 34.6 mph is Moderate: it is below 35.
+- **Values between the table's whole numbers.** The brief writes wind in whole mph (25–34, 35–44) and rain
+  and snow in hundredths of an inch. Each forecast reading is rounded to that precision (half up, as the
+  panel rounds) before it is rated, so a checkpoint's level always matches the numbers shown next to it:
+  34.6 mph reads 35 mph and is High, 0.249 in/hr of rain reads 0.25 and is High, and 1.004 reads 1.00 and is
+  Severe. The heatmap is rated the same way.
 - **Load reasons.** When the load raises a checkpoint's level, the checkpoint's reasons say so ("load
   42,000 lb").
 - **No Travel ranks first.** No Travel is worse than Severe, and the brief treats it as "do not drive". So a
@@ -209,9 +212,10 @@ cd frontend && npm run lint && npx tsc -b && npm test
 
 CI runs all of these on every push to `main` and on every pull request (`.github/workflows/ci.yml`).
 
-The backend tests (144) cover:
+The backend tests (145) cover:
 
-- **Risk table:** every edge and every load rule.
+- **Risk table:** every edge and every load rule, and that checkpoints and the heatmap are rated on the
+  numbers they show.
 - **Ranking:** each step of the recommendation order, its reason messages and the trade-off line.
 - **Checkpoints:** spacing and ETAs.
 - **Polyline decoding and trip parsing:** against a recorded Valhalla response.
