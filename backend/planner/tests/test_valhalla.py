@@ -57,7 +57,8 @@ class FakeSession:
 
 
 def provider(responder):
-    return ValhallaProvider("https://valhalla.example", "test-agent", session=FakeSession(responder))
+    return ValhallaProvider("https://valhalla.example", "test-agent", session=FakeSession(responder),
+                            sleep=lambda seconds: None)
 
 
 def test_parse_trip_matches_valhallas_own_totals():
@@ -159,3 +160,18 @@ def test_service_errors_become_routing_errors_with_the_services_message():
     p = provider(lambda body: FakeResponse(502, None))
     with pytest.raises(RoutingError, match="HTTP 502"):
         p.routes((0.0, 0.0), (1.0, 1.0), 10_000)
+    assert len(p.session.calls) == 2  # a busy server gets one more try, then the error stands
+
+
+def test_a_busy_server_is_retried_once():
+    answers = [FakeResponse(503, {"error": "The service is overloaded"}), FakeResponse(200, {"trip": FIXTURE["trip"]})]
+    p = provider(lambda body: answers.pop(0))
+    assert len(p._request([(1.0, 2.0), (3.0, 4.0)], load_lb=10_000, alternates=0)) == 1
+    assert not answers
+
+
+def test_a_bad_request_is_not_retried():
+    p = provider(lambda body: FakeResponse(400, {"error": "No suitable edges near location"}))
+    with pytest.raises(RoutingError):
+        p._request([(1.0, 2.0), (3.0, 4.0)], load_lb=10_000, alternates=0)
+    assert len(p.session.calls) == 1

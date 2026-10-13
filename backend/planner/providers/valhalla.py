@@ -12,6 +12,7 @@ line. Longer trips, and every detour, are therefore routed as a chain of legs, e
 through points on the great circle between the ends, and the legs are joined into one route.
 """
 import logging
+import time
 from itertools import pairwise
 
 import requests
@@ -28,16 +29,20 @@ DETOUR_MIN_MI, DETOUR_MAX_MI = 5.0, 150.0
 MAX_DETOUR_TIME_RATIO = 1.6  # drop a detour that takes 60% longer than the best route
 MAX_OVERLAP = 0.8  # drop a route whose roads are 80% or more the same as one already kept
 LEG_LIMIT_MI = 925.0  # the public server refuses requests whose locations are over 1,500 km (932 mi) apart
+RETRY_STATUSES = (429, 502, 503, 504)  # a busy public server; worth one more try
+RETRY_DELAY_SECONDS = 1.5
 
 
 class ValhallaProvider:
     name = "valhalla"
 
-    def __init__(self, base_url: str, user_agent: str, timeout: float = 20.0, session: requests.Session | None = None):
+    def __init__(self, base_url: str, user_agent: str, timeout: float = 20.0, session: requests.Session | None = None,
+                 sleep=time.sleep):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.session = session or requests.Session()
         self.session.headers.update({"User-Agent": user_agent})
+        self.sleep = sleep
 
     def routes(self, origin, destination, load_lb, count=3):
         if haversine_mi(origin, destination) <= LEG_LIMIT_MI:
@@ -91,18 +96,28 @@ class ValhallaProvider:
         }
         if alternates:
             body["alternates"] = alternates
-        try:
-            resp = self.session.post(f"{self.base_url}/route", json=body, timeout=self.timeout)
-        except requests.RequestException as err:
-            raise RoutingError(f"The routing service could not be reached ({type(err).__name__}).") from err
-        try:
-            data = resp.json()
-        except ValueError as err:
-            raise RoutingError(f"The routing service answered HTTP {resp.status_code} without JSON.") from err
-        if resp.status_code != 200 or "trip" not in data:
-            raise RoutingError(data.get("error") or f"The routing service answered HTTP {resp.status_code}.")
+        data = self._post(body)
         trips = [data["trip"]] + [alt["trip"] for alt in data.get("alternates", []) if "trip" in alt]
         return [parse_trip(trip) for trip in trips]
+
+    def _post(self, body: dict) -> dict:
+        for attempt in (1, 2):
+            try:
+                resp = self.session.post(f"{self.base_url}/route", json=body, timeout=self.timeout)
+            except requests.RequestException as err:
+                raise RoutingError(f"The routing service could not be reached ({type(err).__name__}).") from err
+            if resp.status_code in RETRY_STATUSES and attempt == 1:
+                log.info("routing service busy (HTTP %s), retrying once", resp.status_code)
+                self.sleep(RETRY_DELAY_SECONDS)
+                continue
+            try:
+                data = resp.json()
+            except ValueError as err:
+                raise RoutingError(f"The routing service answered HTTP {resp.status_code} without JSON.") from err
+            if resp.status_code != 200 or "trip" not in data:
+                raise RoutingError(data.get("error") or f"The routing service answered HTTP {resp.status_code}.")
+            return data
+        raise AssertionError("unreachable")
 
 
 def parse_trip(trip: dict) -> RouteOption:
