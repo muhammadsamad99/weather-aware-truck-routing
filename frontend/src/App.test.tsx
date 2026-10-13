@@ -333,6 +333,17 @@ describe('the results', () => {
     expect(document.activeElement).toBe(rows()[0])
   })
 
+  it('show a risk stretch under half a mile as under a mile in the card and its bar', async () => {
+    const risk = { ...PLAN.routes[0].risk, no_travel_miles: 0.3, miles_by_level: { ...PLAN.routes[0].risk.miles_by_level, 'No Travel': 0.3 } }
+    api.planReply = { status: 200, body: { ...PLAN, routes: [{ ...PLAN.routes[0], risk }] } }
+    const { container } = render(<App />, { wrapper: AppProviders })
+    await planATrip()
+    expect(container.querySelector('.route-card [role="img"]')?.getAttribute('aria-label')).toBe(
+      'Miles by risk level: Moderate 69 mi, No Travel <1 mi',
+    )
+    expect(screen.getByRole('button', { name: /No Travel <1 mi/ })).toBeTruthy()
+  })
+
   it('leave no id reference dangling and no id used twice', async () => {
     api.planReply = { status: 200, body: TWO_ROUTES }
     const { container } = render(<App />, { wrapper: AppProviders })

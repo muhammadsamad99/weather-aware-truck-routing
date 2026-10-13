@@ -99,7 +99,7 @@ function Figure({ label, value }: { label: string; value: string }) {
 function RiskBar({ route }: { route: PlannedRoute }) {
   const total = Object.values(route.risk.miles_by_level).reduce((a, b) => a + b, 0)
   const parts = LEVELS.map((l) => ({ ...l, miles: route.risk.miles_by_level[l.name] ?? 0 })).filter((p) => p.miles > 0)
-  const label = parts.map((p) => `${p.name} ${Math.round(p.miles)} mi`).join(', ')
+  const label = parts.map((p) => `${p.name} ${formatRiskMiles(p.miles)}`).join(', ')
   return (
     <Box
       component="span"
@@ -108,7 +108,7 @@ function RiskBar({ route }: { route: PlannedRoute }) {
       sx={{ display: 'flex', height: 8, mt: 1, borderRadius: 1, overflow: 'hidden', bgcolor: 'grey.100' }}
     >
       {parts.map((p) => (
-        <Tooltip key={p.name} title={`${p.name}: ${Math.round(p.miles)} mi`} disableInteractive>
+        <Tooltip key={p.name} title={`${p.name}: ${formatRiskMiles(p.miles)}`} disableInteractive>
           {/* width and colour vary per route, so they are inline styles rather than generated classes */}
           <span style={{ width: `${(p.miles / total) * 100}%`, background: p.color }} />
         </Tooltip>

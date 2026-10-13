@@ -231,7 +231,7 @@ The backend tests (145) cover:
 - **The API:** with routing, weather and places replaced by fakes. Any request a test makes to a host other
   than this machine fails the test.
 
-The frontend tests (28, Vitest and Testing Library) cover:
+The frontend tests (29, Vitest and Testing Library) cover:
 
 - **The place boxes:** a search from exactly three letters and only after a pause in typing, no lookups for
   text the example fills in, a picked place kept until typed over, and picked places sent as coordinates.
