@@ -124,6 +124,13 @@ Decisions where the brief leaves room:
   42,000 lb").
 - **No Travel ranks first.** No Travel is worse than Severe, and the brief treats it as "do not drive". So a
   route that crosses any of it is never recommended over one that does not, even with fewer Severe miles.
+- **The order is applied as written, and its cost in time is shown.** The brief asks for a balance of risk
+  and time, then gives the order: Severe miles, High miles, average risk, travel time. The app applies that
+  order as written rather than inventing its own weighting. Two things keep the balance visible and bounded:
+  - Routes more than 1.6× the fastest route's time are never offered.
+  - When the recommended route isn't the fastest, the panel says what the extra time buys, for example
+    "4 h 02 min longer than Route A, the fastest route, for lower average risk (0.08 vs 0.17)". The driver
+    can then pick the faster card.
 - **Truck weight.** Valhalla is given the gross weight: 35,000 lb tare plus the load.
 - **Time zones.** Times are sent in UTC and shown in the browser's time zone.
 - **Departure window.** A departure from an hour ago up to 14 days ahead is accepted, which is what the
@@ -136,7 +143,7 @@ Every service is free and needs no API key.
 | Service | Used for | Limits |
 |---|---|---|
 | [Valhalla](https://valhalla.github.io/valhalla/) public server, run by [FOSSGIS](https://www.fossgis.de/) | Truck routes | The [usage policy](https://routing.openstreetmap.de/about.html) allows at most one request per second, with attribution and a "fix the map" link (both in the panel footer). The whole service spaces its requests a second apart, and routes are cached. One request may not span more than 1,500 km, so longer trips are routed in legs and joined. The server is sometimes busy, so a busy answer is retried once. |
-| [Open-Meteo](https://open-meteo.com) | Hourly forecasts | Free for non-commercial use: 600 calls a minute and 10,000 a day. The terms don't say how a request for many locations counts, but each location seems to count as a call: one coast-to-coast plan of about 1,000 locations hit the per-minute limit on its own. So a plan asks for at most 450 (see above), and the whole service asks for at most 560 in any minute: a plan that would go over waits for the minute to free up (up to 45 seconds) or says to try again. Open-Meteo's own limit message can still appear, for example if the host shares its outgoing address with other apps that use Open-Meteo. Forecasts are cached for an hour per cell. |
+| [Open-Meteo](https://open-meteo.com) | Hourly forecasts | Free for non-commercial use: 600 calls a minute and 10,000 a day. The terms don't say how a request for many locations counts, but each location seems to count as a call: one coast-to-coast plan of about 1,000 locations hit the per-minute limit on its own. So a plan asks for at most 450 (see above), and the whole service asks for at most 560 in any minute: a plan that would go over waits until the minute frees up (at most a minute). Open-Meteo's own limit message can still appear, for example if the host shares its outgoing address with other apps that use Open-Meteo. Forecasts are cached for an hour per cell. |
 | [Photon](https://photon.komoot.io) | Place search | Fair use. Results are cached for a day. |
 | [OpenFreeMap](https://openfreemap.org) | Base map | None stated. If the base map style cannot load, the routes and weather still draw on a plain background. |
 

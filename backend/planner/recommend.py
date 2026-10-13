@@ -82,6 +82,34 @@ def reason(best: RouteRisk, runner_up: RouteRisk | None) -> str:
     return "Tied with the next route on every criterion; listed first."
 
 
+def tradeoff(best: RouteRisk, fastest: RouteRisk, fastest_name: str, say_gain: bool = True) -> str | None:
+    """What the recommended route buys over the fastest route, when they differ: the extra driving time and
+    the first criterion (in ranking order) on which the recommended route is better. With `say_gain` off
+    (the reason already compares against this route), only the time."""
+    extra = best.total_seconds - fastest.total_seconds
+    if round(extra / 60) <= 0:
+        return None
+    if not say_gain:
+        return f"It takes {_duration(extra)} longer than {fastest_name}, the fastest route."
+    miles = round
+    for label, a, b in (("No Travel", best.no_travel_miles, fastest.no_travel_miles),
+                        ("Severe", best.severe_miles, fastest.severe_miles),
+                        ("High", best.high_miles, fastest.high_miles)):
+        if miles(a, MILE_PRECISION) != miles(b, MILE_PRECISION):
+            gain = f"fewer {label} miles ({a:.0f} mi vs {b:.0f} mi)"
+            break
+    else:
+        if round(best.average, 3) == round(fastest.average, 3):
+            return None  # equal risk: the faster route would have ranked first
+        gain = f"lower average risk ({best.average:.2f} vs {fastest.average:.2f})"
+    return f"{_duration(extra)} longer than {fastest_name}, the fastest route, for {gain}."
+
+
+def _duration(seconds: float) -> str:
+    minutes = round(seconds / 60)
+    return f"{minutes} min" if minutes < 60 else _hours(seconds)
+
+
 def _hours(seconds: float) -> str:
     minutes = round(seconds / 60)
     return f"{minutes // 60} h {minutes % 60:02d} min"

@@ -267,3 +267,27 @@ def test_an_unknown_routing_provider_is_a_clear_error(settings):
     settings.ROUTING_PROVIDER = "acme"
     with pytest.raises(RoutingError, match="Unknown routing provider 'acme'"):
         service.make_provider()
+
+
+def test_a_slower_recommendation_says_what_it_trades_for_time():
+    def rain_east(lat, lon, moment):
+        return HourWeather(wind_mph=5, rain_in_hr=0.4 if lon > -89.9 else 0, snow_in_hr=0)
+
+    fast_wet, slow_dry = route("Route A", 70, 100, mph=65), route("Route B", 0, 100, mph=50)
+    plan = service.plan_trip(trip(), provider=FakeProvider([fast_wet, slow_dry]), forecasts=FakeForecasts(rain_east))
+    assert plan["recommended"] == "Route B"
+    # the only other route is the fastest, and the reason already compares with it
+    assert plan["tradeoff"] == "It takes 28 min longer than Route A, the fastest route."
+    plan = service.plan_trip(trip(), provider=FakeProvider([slow_dry]), forecasts=FakeForecasts(calm))
+    assert plan["tradeoff"] is None
+
+
+def test_the_tradeoff_names_the_gain_when_the_runner_up_is_not_the_fastest():
+    def by_longitude(lat, lon, moment):  # High rain far east, Moderate a little east, dry on the meridian
+        rain = 0.4 if lon > -89.3 else 0.15 if lon > -89.8 else 0
+        return HourWeather(wind_mph=5, rain_in_hr=rain, snow_in_hr=0)
+
+    routes = [route("Route A", 70, 100, mph=65), route("Route B", 0, 100, mph=50), route("Route C", 15, 100, mph=60)]
+    plan = service.plan_trip(trip(), provider=FakeProvider(routes), forecasts=FakeForecasts(by_longitude))
+    assert [r["name"] for r in sorted(plan["routes"], key=lambda r: r["rank"])] == ["Route B", "Route C", "Route A"]
+    assert plan["tradeoff"].startswith("28 min longer than Route A, the fastest route, for fewer High miles (0 mi vs ")

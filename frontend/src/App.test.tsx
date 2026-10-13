@@ -70,6 +70,7 @@ const PLAN: Plan = {
   ],
   recommended: 'Route A',
   reason: 'Only one route was found.',
+  tradeoff: null,
   levels: ['Low', 'Moderate', 'High', 'Severe', 'No Travel'],
   weather_grid_deg: 0.1,
   heatmap: { start: T0, hours: 48, step_deg: 0.2, points: [[-90, 40]], frames: Array.from({ length: 49 }, () => [0]) },

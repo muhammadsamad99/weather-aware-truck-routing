@@ -125,6 +125,7 @@ export default function App() {
                 Recommended: <strong>{plan.recommended}</strong>
               </div>
               <p>{plan.reason}</p>
+              {plan.tradeoff && <p>{plan.tradeoff}</p>}
               <p className="trip-summary">
                 {plan.origin.label} → {plan.destination.label}
                 <br />

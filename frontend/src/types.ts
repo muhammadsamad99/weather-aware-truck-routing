@@ -61,6 +61,7 @@ export interface Plan {
   routes: PlannedRoute[]
   recommended: string
   reason: string
+  tradeoff: string | null // when the recommended route isn't the fastest: the extra time and what it buys
   levels: LevelName[]
   weather_grid_deg: number // 0.1 normally; wider on long trips, to stay within the forecast service's limits
   heatmap: Heatmap

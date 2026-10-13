@@ -5,7 +5,7 @@ import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { bounds, haversineMi, positionAt } from '../geometry'
 import { levelColor, levelColorExpression } from '../levels'
-import { formatDateTime, formatMiles } from '../format'
+import { formatDateTime, formatDuration, formatMiles } from '../format'
 import type { Checkpoint, Plan, PlannedRoute } from '../types'
 import { mapProblem, type MapProblem } from '../mapProblem'
 import { MapUnavailable } from './MapFallback'
@@ -117,6 +117,16 @@ export default function MapView({ plan, selected, hour, showHeatmap, focus, onSe
       map.on('mouseenter', layer, () => (map.getCanvas().style.cursor = 'pointer'))
       map.on('mouseleave', layer, () => (map.getCanvas().style.cursor = ''))
     }
+    // Hovering a checkpoint shows when the truck gets there and the risk then; a click shows the rest.
+    const hover = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 10, className: 'cp-hover' })
+    map.on('mousemove', 'checkpoints', (e: MapLayerMouseEvent) => {
+      const f = e.features?.[0]
+      const { route, index } = (f?.properties ?? {}) as { route?: string; index?: number }
+      const cp = route !== undefined && index !== undefined ? findCheckpoint(planRef.current, route, index) : undefined
+      if (!cp) return
+      hover.setLngLat([cp.lon, cp.lat]).setText(`${formatDateTime(cp.eta)} · ${cp.level_name}`).addTo(map)
+    })
+    map.on('mouseleave', 'checkpoints', () => hover.remove())
     return () => {
       map.remove()
       mapRef.current = null
@@ -360,7 +370,7 @@ function routeLabels(
     const el = document.createElement('button')
     el.type = 'button'
     el.className = `route-label${r.name === selected ? ' selected' : ''}`
-    el.textContent = `${r.name} · ${formatMiles(r.miles)}${r.recommended ? ' · Recommended' : ''}`
+    el.textContent = `${r.name} · ${formatMiles(r.miles)} · ${formatDuration(r.seconds)}${r.recommended ? ' · Recommended' : ''}`
     el.addEventListener('click', (e) => {
       e.stopPropagation()
       selectRef.current(r.name)

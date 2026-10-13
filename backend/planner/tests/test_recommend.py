@@ -1,4 +1,4 @@
-from planner.recommend import RouteRisk, rank, reason, route_risk
+from planner.recommend import RouteRisk, rank, reason, route_risk, tradeoff
 from planner.risk import HIGH, LOW, MODERATE, NO_TRAVEL, SEVERE
 
 
@@ -65,3 +65,23 @@ def test_reasons_name_the_deciding_criterion():
 def test_single_checkpoint_route():
     assert route_risk([0], [HIGH], total_seconds=0).average == HIGH
     assert route_risk([0, 10], [NO_TRAVEL, LOW], total_seconds=600).no_travel_miles == 10
+
+
+def test_the_tradeoff_names_the_extra_time_and_what_it_buys():
+    slower_safer, faster = risk(high=0, seconds=40_000), risk(high=50, seconds=36_000)
+    assert tradeoff(slower_safer, faster, "Route A") == (
+        "1 h 07 min longer than Route A, the fastest route, for fewer High miles (0 mi vs 50 mi).")
+    assert tradeoff(risk(severe=0, seconds=36_900), risk(severe=12, seconds=36_000), "Route B") == (
+        "15 min longer than Route B, the fastest route, for fewer Severe miles (0 mi vs 12 mi).")
+    assert tradeoff(risk(average=0.2, seconds=39_000), risk(average=0.6, seconds=36_000), "Route C") == (
+        "50 min longer than Route C, the fastest route, for lower average risk (0.20 vs 0.60).")
+
+
+def test_the_tradeoff_gives_only_the_time_when_the_reason_already_compares_with_the_fastest():
+    assert tradeoff(risk(high=0, seconds=40_000), risk(high=50, seconds=36_000), "Route A", say_gain=False) == (
+        "It takes 1 h 07 min longer than Route A, the fastest route.")
+
+
+def test_no_tradeoff_when_the_recommended_route_is_as_fast():
+    assert tradeoff(risk(seconds=36_000), risk(seconds=36_000), "Route A") is None
+    assert tradeoff(risk(seconds=36_020), risk(seconds=36_000), "Route A") is None  # under a minute

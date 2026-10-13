@@ -17,7 +17,7 @@ from .geocode import Geocoder, Place
 from .heatmap import Corridor, corridor_points
 from .providers.base import RouteOption, RoutingError, RoutingProvider
 from .providers.valhalla import Throttle, ValhallaProvider
-from .recommend import rank, reason, route_risk
+from .recommend import rank, reason, route_risk, tradeoff
 from .risk import LEVEL_NAMES, assess
 from .weather import GRID_DEG, PER_MINUTE, Forecasts, MinuteQuota, WeatherError, hour_floor
 
@@ -107,6 +107,7 @@ def plan_trip(trip: TripRequest, provider: RoutingProvider | None = None, foreca
 
     order = rank(risks)
     best = order[0]
+    fastest = min(range(len(risks)), key=lambda i: risks[i].total_seconds)
     runner_up = order[1] if len(order) > 1 else None
     for position, i in enumerate(order, start=1):
         results[i]["rank"] = position
@@ -122,6 +123,8 @@ def plan_trip(trip: TripRequest, provider: RoutingProvider | None = None, foreca
         "routes": results,
         "recommended": results[best]["name"],
         "reason": reason(risks[best], risks[runner_up] if runner_up is not None else None),
+        "tradeoff": (tradeoff(risks[best], risks[fastest], results[fastest]["name"], say_gain=fastest != runner_up)
+                     if fastest != best else None),
         "levels": list(LEVEL_NAMES),
         "weather_grid_deg": getattr(forecasts, "grid_deg", GRID_DEG),
         "heatmap": _heatmap(corridor, forecasts, trip),
