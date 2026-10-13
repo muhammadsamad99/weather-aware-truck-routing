@@ -1,6 +1,7 @@
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
+import requests
 from django.core.cache import cache
 
 from planner.tests.fakes import FakeResponse
@@ -8,6 +9,7 @@ from planner.weather import (
     BATCH,
     GRID_DEG,
     MAX_PLACES,
+    RETRY_DELAY_SECONDS,
     Forecasts,
     MinuteQuota,
     WeatherError,
@@ -203,3 +205,76 @@ def test_a_missing_value_is_not_read_as_calm_weather():
 def test_missing_showers_alone_count_as_none():
     s = parse_hourly(series_item(rain=0.2, showers=lambda h: None))
     assert s[T0].rain_in_hr == pytest.approx(0.2)
+
+
+class FlakySession(FakeSession):
+    """Answers each request with the next outcome in `script`: an exception to raise, a status to send
+    (with an error body), or "ok" for a forecast."""
+
+    def __init__(self, *script):
+        super().__init__()
+        self.script = list(script)
+
+    def get(self, url, params, timeout, stream=False):
+        outcome = self.script.pop(0)
+        if isinstance(outcome, Exception):
+            self.calls.append(params)
+            raise outcome
+        if outcome == "ok":
+            return super().get(url, params, timeout, stream)
+        self.calls.append(params)
+        return FakeResponse(outcome, {"error": True, "reason": f"HTTP {outcome} from the test"})
+
+
+def flaky_forecasts(session, quota=None):
+    slept = []
+    f = Forecasts("https://weather.example", "test-agent", session=session, quota=quota, sleep=slept.append)
+    return f, slept
+
+
+def test_a_stalled_request_is_asked_once_more_and_the_retry_counts_against_the_quota():
+    taken = []
+
+    class Recording(MinuteQuota):
+        def take(self, n, max_wait=0):
+            taken.append(n)
+
+    session = FlakySession(requests.ReadTimeout("stalled"), "ok")
+    f, slept = flaky_forecasts(session, quota=Recording(560))
+    f.load([(40.0, -90.0), (41.0, -91.0)], T0.date(), T0.date())
+    assert len(session.calls) == 2 and session.calls[0] == session.calls[1]
+    assert slept == [RETRY_DELAY_SECONDS]
+    assert taken == [2, 2]  # the service counts the second request's places too
+    assert f.at(40.0, -90.0, T0).wind_mph == 10.0
+
+
+def test_a_briefly_unavailable_service_is_asked_once_more():
+    for status in (502, 503, 504):
+        cache.clear()
+        session = FlakySession(status, "ok")
+        f, slept = flaky_forecasts(session)
+        f.load([(40.0, -90.0)], T0.date(), T0.date())
+        assert len(session.calls) == 2 and slept == [RETRY_DELAY_SECONDS]
+
+
+def test_a_service_that_stalls_twice_fails_with_a_clear_error():
+    session = FlakySession(requests.ReadTimeout("stalled"), requests.ConnectionError("refused"))
+    f, _ = flaky_forecasts(session)
+    with pytest.raises(WeatherError, match=r"could not be reached \(ConnectionError\)"):
+        f.load([(40.0, -90.0)], T0.date(), T0.date())
+    session = FlakySession(503, 503)
+    f, _ = flaky_forecasts(session)
+    with pytest.raises(WeatherError, match="HTTP 503 from the test"):
+        f.load([(40.0, -90.0)], T0.date(), T0.date())
+    assert len(session.calls) == 2
+
+
+def test_refusals_and_the_per_minute_limit_are_not_asked_again():
+    # 429 is the service's per-minute limit: asking again a second later can't help (the quota waits instead)
+    for status in (400, 429):
+        cache.clear()
+        session = FlakySession(status, "ok")
+        f, slept = flaky_forecasts(session)
+        with pytest.raises(WeatherError, match=f"HTTP {status} from the test"):
+            f.load([(40.0, -90.0)], T0.date(), T0.date())
+        assert len(session.calls) == 1 and slept == []

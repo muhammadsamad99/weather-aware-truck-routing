@@ -162,7 +162,7 @@ Every service is free and needs no API key.
 | Service | Used for | Limits |
 |---|---|---|
 | [Valhalla](https://valhalla.github.io/valhalla/) public server, run by [FOSSGIS](https://www.fossgis.de/) | Truck routes | The [usage policy](https://routing.openstreetmap.de/about.html) allows at most one request per second, with attribution and a "fix the map" link (both in the panel footer). The whole service spaces its requests a second apart, and routes are cached. One request may not span more than 1,500 km, so longer trips are routed in legs and joined. The server is sometimes busy, so a busy or "overloaded" answer is tried twice more, 1.5 s and then 3 s later. |
-| [Open-Meteo](https://open-meteo.com) | Hourly forecasts | Free for non-commercial use: 600 calls a minute and 10,000 a day. The terms don't say how a request for many locations counts, but each location seems to count as a call: one coast-to-coast plan of about 1,000 locations hit the per-minute limit on its own. So a plan asks for at most 450 (see above), and the whole service asks for at most 560 in any minute: a plan that would go over waits until the minute frees up (at most a minute). Open-Meteo's own limit message can still appear, for example if the host shares its outgoing address with other apps that use Open-Meteo. Forecasts are cached for an hour per cell. |
+| [Open-Meteo](https://open-meteo.com) | Hourly forecasts | Free for non-commercial use: 600 calls a minute and 10,000 a day. The terms don't say how a request for many locations counts, but each location seems to count as a call: one coast-to-coast plan of about 1,000 locations hit the per-minute limit on its own. So a plan asks for at most 450 (see above), and the whole service asks for at most 560 in any minute: a plan that would go over waits until the minute frees up (at most a minute). Open-Meteo's own limit message can still appear, for example if the host shares its outgoing address with other apps that use Open-Meteo. A request now and then gets no answer for 20 s although the same request a moment later takes a second or two, so a request that gets no answer, or a 502-504, is asked once more a second later (and counts against the minute again). Forecasts are cached for an hour per cell. |
 | [Photon](https://photon.komoot.io) | Place search | Fair use. Results are cached for a day. |
 | [OpenFreeMap](https://openfreemap.org) | Base map | None stated. If the base map style cannot load, the routes and weather still draw on a plain background. |
 
@@ -206,15 +206,15 @@ cd frontend && npm run lint && npx tsc -b && npm test
 
 CI runs all of these on every push and pull request (`.github/workflows/ci.yml`).
 
-The backend tests (131) cover:
+The backend tests (138) cover:
 
 - **Risk table:** every edge and every load rule.
 - **Ranking:** each step of the recommendation order, its reason messages and the trade-off line.
 - **Checkpoints:** spacing and ETAs.
 - **Polyline decoding and trip parsing:** against a recorded Valhalla response.
 - **Route candidates:** alternates, detours, near-duplicates, spurs, and long trips split into legs.
-- **Weather:** the forecast-hour rule, the unit checks, missing values, the location budget and the
-  per-minute quota.
+- **Weather:** the forecast-hour rule, the unit checks, missing values, the location budget, the
+  per-minute quota, and which failures are asked again.
 - **Pacing:** requests to the routing server are spaced a second apart, across threads.
 - **Corridor grid.**
 - **Place ranking**, and telling "no such place" from a failing place service.

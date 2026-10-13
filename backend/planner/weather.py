@@ -39,6 +39,8 @@ BATCH = 50  # locations per request, to keep URLs short
 CACHE_SECONDS = 3600
 PARALLEL_REQUESTS = 4
 MAX_FORECAST_DAYS = 15  # Open-Meteo forecasts 16 days ahead; leave room for the hours a trip takes
+RETRY_STATUSES = (502, 503, 504)  # briefly unavailable; 429 is the per-minute limit, which MinuteQuota handles
+RETRY_DELAY_SECONDS = 1.0
 
 
 class WeatherError(Exception):
@@ -114,10 +116,11 @@ class Forecasts:
     """Hourly weather for a set of locations over a date range, fetched in as few requests as possible."""
 
     def __init__(self, base_url: str, user_agent: str, timeout: float = 20.0, session: requests.Session | None = None,
-                 quota: MinuteQuota | None = None):
+                 quota: MinuteQuota | None = None, sleep=time.sleep):
         self.base_url = base_url
         self.timeout = timeout
         self.quota = quota
+        self.sleep = sleep
         self.session = session or requests.Session()
         self.session.headers.update({"User-Agent": user_agent})
         self._series: dict[tuple, dict[datetime, HourWeather]] = {}
@@ -180,10 +183,7 @@ class Forecasts:
             "start_date": start.isoformat(),
             "end_date": end.isoformat(),
         }
-        try:
-            resp = self.session.get(self.base_url, params=params, timeout=self.timeout, stream=True)
-        except requests.RequestException as err:
-            raise WeatherError(f"The weather service could not be reached ({type(err).__name__}).") from err
+        resp = self._get(params, len(keys))
         try:
             data = read_json(resp)
         except (SlowResponse, requests.RequestException) as err:
@@ -203,6 +203,29 @@ class Forecasts:
                 raise WeatherError(f"The weather service sent a forecast in an unexpected shape ({err!r}).") from err
             self._series[key] = series
             cache.set(self._cache_key(key, start, end), series, CACHE_SECONDS)
+
+
+    def _get(self, params: dict, places: int) -> requests.Response:
+        """The forecast request, asked once more if the service doesn't answer or is briefly unavailable: it
+        sometimes stalls on one request for 20 s and answers the same request at once when asked again."""
+        for attempt in (1, 2):
+            try:
+                resp = self.session.get(self.base_url, params=params, timeout=self.timeout, stream=True)
+            except (requests.ConnectionError, requests.Timeout) as err:
+                if attempt == 2:
+                    raise WeatherError(f"The weather service could not be reached ({type(err).__name__}).") from err
+                log.info("weather service did not answer (%s), trying again", type(err).__name__)
+            except requests.RequestException as err:
+                raise WeatherError(f"The weather service could not be reached ({type(err).__name__}).") from err
+            else:
+                if resp.status_code not in RETRY_STATUSES or attempt == 2:
+                    return resp
+                log.info("weather service answered HTTP %s, trying again", resp.status_code)
+                resp.close()
+            if self.quota:
+                self.quota.take(places)  # the service counts the second request's locations too
+            self.sleep(RETRY_DELAY_SECONDS)
+        raise AssertionError("unreachable")
 
 
 def parse_hourly(item: dict) -> dict[datetime, HourWeather]:
