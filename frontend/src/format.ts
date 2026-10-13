@@ -29,6 +29,9 @@ export function formatDuration(seconds: number): string {
 
 export const formatMiles = (miles: number) => `${miles.toLocaleString(undefined, { maximumFractionDigits: 0 })} mi`
 
+/** Miles of a risk level: a stretch under half a mile is still there, so it isn't shown as 0. */
+export const formatRiskMiles = (miles: number) => (miles > 0 && miles < 0.5 ? '<1 mi' : formatMiles(miles))
+
 export const formatLoad = (lb: number) => `${lb.toLocaleString()} lb`
 
 /** A `datetime-local` value for the next whole hour, in local time. */

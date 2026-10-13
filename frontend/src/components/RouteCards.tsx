@@ -7,7 +7,7 @@ import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 import { memo } from 'react'
 import { LEVELS } from '../levels'
-import { formatDateTime, formatDuration, formatMiles } from '../format'
+import { formatDateTime, formatDuration, formatMiles, formatRiskMiles } from '../format'
 import type { PlannedRoute } from '../types'
 
 interface Props {
@@ -67,9 +67,9 @@ function RouteCards({ routes, selected, onSelect }: Props) {
                   component="span"
                   sx={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', mt: 0.75, fontVariantNumeric: 'tabular-nums' }}
                 >
-                  <Figure label="No Travel" value={formatMiles(r.risk.no_travel_miles)} />
-                  <Figure label="Severe" value={formatMiles(r.risk.severe_miles)} />
-                  <Figure label="High" value={formatMiles(r.risk.high_miles)} />
+                  <Figure label="No Travel" value={formatRiskMiles(r.risk.no_travel_miles)} />
+                  <Figure label="Severe" value={formatRiskMiles(r.risk.severe_miles)} />
+                  <Figure label="High" value={formatRiskMiles(r.risk.high_miles)} />
                   <Figure label="Avg risk" value={r.risk.average.toFixed(2)} />
                 </Box>
               </CardActionArea>
@@ -122,8 +122,8 @@ function cardLabel(r: PlannedRoute): string {
   const risk = r.risk
   return (
     `${r.name}, rank ${r.rank}${r.recommended ? ', recommended' : ''}: ${formatMiles(r.miles)}, ` +
-    `${formatDuration(r.seconds)}, arrives ${formatDateTime(r.arrival)}. No Travel ${formatMiles(risk.no_travel_miles)}, ` +
-    `Severe ${formatMiles(risk.severe_miles)}, High ${formatMiles(risk.high_miles)}, ` +
+    `${formatDuration(r.seconds)}, arrives ${formatDateTime(r.arrival)}. No Travel ${formatRiskMiles(risk.no_travel_miles)}, ` +
+    `Severe ${formatRiskMiles(risk.severe_miles)}, High ${formatRiskMiles(risk.high_miles)}, ` +
     `average risk ${risk.average.toFixed(2)}.`
   )
 }

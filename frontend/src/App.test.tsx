@@ -84,6 +84,7 @@ const CHICAGO = { label: 'Chicago, Illinois, US', lat: 41.8756, lon: -87.6244 }
 const api = vi.hoisted(() => ({
   suggestions: [] as unknown[],
   planReply: null as null | { status: number; body: unknown },
+  rawPlanReply: null as null | Response,
   holdNextPlan: false, // the next plan request waits until it is aborted, or released
   release: () => {},
 }))
@@ -96,6 +97,7 @@ beforeEach(() => {
   mapStart.handlers = {}
   api.suggestions = []
   api.planReply = null
+  api.rawPlanReply = null
   api.holdNextPlan = false
   vi.spyOn(console, 'warn').mockImplementation(() => {})
   vi.stubGlobal(
@@ -109,6 +111,7 @@ beforeEach(() => {
           init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
         })
       }
+      if (api.rawPlanReply) return api.rawPlanReply
       return api.planReply ? json(api.planReply.body, api.planReply.status) : json(PLAN)
     }),
   )
@@ -280,6 +283,8 @@ const ROUTE_B = {
   ],
 }
 const TWO_ROUTES: Plan = { ...PLAN, routes: [PLAN.routes[0], ROUTE_B] }
+const planCalls = () => fetchCalls().filter(([u]) => u === '/api/plan')
+const geocodeCalls = () => fetchCalls().filter(([u]) => u.startsWith('/api/geocode'))
 
 describe('the results', () => {
   it('switch to the route whose card is picked, in the cards and the checkpoint table', async () => {
@@ -344,5 +349,138 @@ describe('the results', () => {
       .filter(Boolean)
     expect(refs.length).toBeGreaterThan(5)
     expect(refs.filter((id) => !document.getElementById(id))).toEqual([])
+  })
+})
+
+describe('the form', () => {
+  it('checks the trip before asking the server', () => {
+    render(<App />, { wrapper: AppProviders })
+    fireEvent.change(screen.getByLabelText('Destination'), { target: { value: 'There' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Plan routes' }))
+    expect(screen.getByText('Enter where the trip starts.')).toBeTruthy()
+    expect(planCalls()).toHaveLength(0)
+  })
+
+  it("shows the server's message under the field it is about", async () => {
+    api.planReply = { status: 400, body: { error: 'Please check the trip details.', fields: { load_lb: ['Too heavy.'] } } }
+    render(<App />, { wrapper: AppProviders })
+    fireEvent.change(screen.getByLabelText('Origin'), { target: { value: 'Here' } })
+    fireEvent.change(screen.getByLabelText('Destination'), { target: { value: 'There' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Plan routes' }))
+    expect(await screen.findByText('Too heavy.')).toBeTruthy()
+    expect(screen.getByLabelText('Load').getAttribute('aria-invalid')).toBe('true')
+  })
+
+  it('replaces a plan still in progress, without reporting the replaced one as an error', async () => {
+    render(<App />, { wrapper: AppProviders })
+    api.holdNextPlan = true
+    fireEvent.change(screen.getByLabelText('Origin'), { target: { value: 'Here' } })
+    fireEvent.change(screen.getByLabelText('Destination'), { target: { value: 'There' } })
+    const button = screen.getByRole('button', { name: 'Plan routes' })
+    act(() => {
+      // both clicks before the button can show it is busy, as with a fast double click
+      fireEvent.click(button)
+      fireEvent.click(button)
+    })
+    await screen.findByText('Only one route was found.')
+    expect(planCalls()).toHaveLength(2)
+    expect(planCalls()[0][1]?.signal?.aborted).toBe(true)
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it("doesn't look up the example's places in the background", async () => {
+    render(<App />, { wrapper: AppProviders })
+    fireEvent.click(screen.getByRole('button', { name: /Try an example/ }))
+    expect((screen.getByLabelText('Origin') as HTMLInputElement).value).toBe('Chicago, IL')
+    await new Promise((r) => setTimeout(r, 600))
+    expect(geocodeCalls()).toHaveLength(0)
+  })
+
+  it('steps the load in whole 500 lb steps from the default', () => {
+    render(<App />, { wrapper: AppProviders })
+    const load = screen.getByLabelText('Load') as HTMLInputElement
+    expect(load.value).toBe('40000')
+    load.stepUp()
+    expect(load.value).toBe('40500')
+  })
+
+  it('searches from exactly three letters, after a pause', async () => {
+    render(<App />, { wrapper: AppProviders })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Origin' }), { target: { value: 'Chi' } })
+    await new Promise((r) => setTimeout(r, 250))
+    expect(geocodeCalls()).toHaveLength(0) // still waiting for the pause
+    await waitFor(() => expect(geocodeCalls()).toHaveLength(1))
+    expect(geocodeCalls()[0][0]).toBe('/api/geocode?q=Chi')
+  })
+})
+
+describe('an answer the app cannot read', () => {
+  it('is reported, and the last plan stays', async () => {
+    const { container } = render(<App />, { wrapper: AppProviders })
+    await planATrip()
+    api.rawPlanReply = new Response('<html>Bad Gateway</html>', { status: 200, headers: { 'Content-Type': 'text/html' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Plan routes' }))
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'The server sent an answer that could not be read. Try again. The map still shows the last plan.',
+    )
+    expect(container.querySelectorAll('.route-card')).toHaveLength(1)
+    api.rawPlanReply = json({ ok: true }) // JSON, but not a plan
+    fireEvent.click(screen.getByRole('button', { name: 'Plan routes' }))
+    await waitFor(() => expect(planCalls()).toHaveLength(3))
+    expect((await screen.findByRole('alert')).textContent).toMatch(/^The server sent an answer that could not be read/)
+    expect(container.querySelectorAll('.route-card')).toHaveLength(1)
+  })
+
+  it('in place search leaves the box working', async () => {
+    vi.mocked(fetch).mockImplementation(async (url) =>
+      String(url).startsWith('/api/geocode') ? json({ unexpected: true }) : json(PLAN),
+    )
+    render(<App />, { wrapper: AppProviders })
+    const origin = screen.getByRole('combobox', { name: 'Origin' })
+    fireEvent.change(origin, { target: { value: 'Chica' } })
+    await waitFor(() => expect(geocodeCalls()).toHaveLength(1))
+    await new Promise((r) => setTimeout(r, 50))
+    expect(screen.getByLabelText('Origin')).toBe(origin)
+  })
+})
+
+describe('the heatmap control', () => {
+  async function planned() {
+    render(<App />, { wrapper: AppProviders })
+    await planATrip()
+    return screen.getByRole('slider', { name: 'Hours after departure' })
+  }
+
+  it('plays hour by hour, wraps at the end, and turns the heatmap off', async () => {
+    const slider = await planned()
+    vi.useFakeTimers()
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Play the next 48 hours' }))
+      act(() => vi.advanceTimersByTime(1400))
+      expect(slider.getAttribute('aria-valuenow')).toBe('2')
+      fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
+      fireEvent.keyDown(slider, { key: 'End' })
+      expect(slider.getAttribute('aria-valuenow')).toBe('48')
+      fireEvent.click(screen.getByRole('button', { name: 'Play the next 48 hours' }))
+      act(() => vi.advanceTimersByTime(700))
+      expect(slider.getAttribute('aria-valuenow')).toBe('0')
+    } finally {
+      vi.useRealTimers()
+    }
+    const toggle = screen.getByRole('switch', { name: /Risk heatmap/ }) as HTMLInputElement
+    expect(toggle.checked).toBe(true)
+    fireEvent.click(toggle)
+    expect(toggle.checked).toBe(false)
+  })
+
+  it('starts again at departure for a new plan', async () => {
+    const slider = await planned()
+    fireEvent.keyDown(slider, { key: 'End' })
+    expect(slider.getAttribute('aria-valuenow')).toBe('48')
+    api.planReply = { status: 200, body: { ...PLAN, departure: '2026-10-16T12:00:00+00:00' } }
+    fireEvent.click(screen.getByRole('button', { name: 'Plan routes' }))
+    await waitFor(() =>
+      expect(screen.getByRole('slider', { name: 'Hours after departure' }).getAttribute('aria-valuenow')).toBe('0'),
+    )
   })
 })

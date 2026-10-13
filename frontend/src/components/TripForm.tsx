@@ -67,7 +67,7 @@ export default function TripForm({ values, onChange, onSubmit, busy, fieldErrors
           helperText={fieldErrors.load_lb}
           slotProps={{
             input: { endAdornment: <InputAdornment position="end">lb</InputAdornment> },
-            htmlInput: { min: 1, max: MAX_LOAD_LB, step: 500, inputMode: 'numeric' },
+            htmlInput: { min: 0, max: MAX_LOAD_LB, step: 500, inputMode: 'numeric' }, // min 0: the arrows step 39,500 → 40,000
           }}
           sx={{ width: { sm: 124 }, flexShrink: 0 }}
         />

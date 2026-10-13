@@ -227,16 +227,22 @@ The backend tests (144) cover:
 - **The API:** with routing, weather and places replaced by fakes. Any request a test makes to a host other
   than this machine fails the test.
 
-The frontend tests (17, Vitest and Testing Library) cover:
+The frontend tests (28, Vitest and Testing Library) cover:
 
-- **The place boxes:** a search only from three letters and once per pause in typing, a picked place kept
-  until typed over, and picked places sent as coordinates.
+- **The place boxes:** a search from exactly three letters and only after a pause in typing, no lookups for
+  text the example fills in, a picked place kept until typed over, and picked places sent as coordinates.
+- **The form:** its own checks before any request, the server's message under the field it is about, a
+  double click that sends two plans (the first is cancelled and not reported as an error), and load steps.
 - **The results:** picking a card switches the route in the cards and the table; the table is one Tab stop
   with the arrow keys between rows; a finished plan is announced once; every id reference resolves.
-- **A failed re-plan:** keeps the last results on screen and says so.
+- **A failed re-plan:** keeps the last results on screen and says so, including when the server's answer
+  can't be read.
+- **The heatmap control:** playing hour by hour and wrapping at +48 h, the on/off switch, and starting at
+  departure again for a new plan.
 - **The map's failure paths:** the app without WebGL (the form and every result still work, and the map area
   says why the map is missing), a map that breaks for another reason, and a lost graphics context.
-- **Risk chips:** every label reads at 4.5:1 or better on its colour.
+- **Risk chips:** every label reads at 4.5:1 or better on its colour; a stretch under half a mile reads
+  "<1 mi", not 0.
 - **The truck's position** at an hour.
 
 ## Deploying

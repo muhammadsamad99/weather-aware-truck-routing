@@ -23,8 +23,10 @@ export default function PlaceInput({ label, value, onChange, error, placeholder 
   const [suggestions, setSuggestions] = useState<Place[]>([])
   const [searching, setSearching] = useState(false)
   const [lookupFailed, setLookupFailed] = useState(false)
+  // Suggestions are only for what the person typed: text set from outside (the example) isn't looked up.
+  const [typed, setTyped] = useState('')
 
-  const query = value.place ? '' : value.text.trim()
+  const query = !value.place && value.text === typed ? typed.trim() : ''
 
   useEffect(() => {
     if (query.length < MIN_CHARS) {
@@ -75,7 +77,10 @@ export default function PlaceInput({ label, value, onChange, error, placeholder 
       // Picking a suggestion also reports an input change (reason 'selectOption', just before onChange);
       // only typing and clearing drop the picked place.
       onInputChange={(_, text, reason) => {
-        if (reason === 'input' || reason === 'clear') onChange({ text, place: null })
+        if (reason === 'input' || reason === 'clear') {
+          setTyped(reason === 'input' ? text : '')
+          onChange({ text, place: null })
+        }
       }}
       onChange={(_, picked) => {
         if (picked && typeof picked !== 'string') onChange({ text: picked.label, place: picked })

@@ -3,6 +3,7 @@ import type { ExpressionSpecification, GeoJSONSource, MapLayerMouseEvent, StyleS
 import 'maplibre-gl/dist/maplibre-gl.css'
 import './MapView.css'
 import Alert from '@mui/material/Alert'
+import Stack from '@mui/material/Stack'
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { bounds, haversineMi, positionAt } from '../geometry'
@@ -59,6 +60,7 @@ export default function MapView({ plan, selected, hour, showHeatmap, focus, onSe
   const selectRef = useRef(onSelectRoute)
   const popup = useRef<maplibregl.Popup | null>(null)
   const markers = useRef<maplibregl.Marker[]>([])
+  const tagPoints = useMemo(() => (plan ? labelPoints(plan.routes) : []), [plan])
   const truck = useRef<maplibregl.Marker | null>(null)
 
   useEffect(() => {
@@ -149,9 +151,9 @@ export default function MapView({ plan, selected, hour, showHeatmap, focus, onSe
     ;(map.getSource('routes') as GeoJSONSource).setData(plan ? routesData(plan.routes, selected) : empty)
     ;(map.getSource('checkpoints') as GeoJSONSource).setData(plan ? checkpointsData(plan.routes, selected) : empty)
     markers.current.forEach((m) => m.remove())
-    markers.current = plan ? endMarkers(plan).concat(routeLabels(plan.routes, selected, selectRef)) : []
+    markers.current = plan ? endMarkers(plan).concat(routeLabels(plan.routes, tagPoints, selected, selectRef)) : []
     markers.current.forEach((m) => m.addTo(map))
-  }, [plan, selected, ready])
+  }, [plan, tagPoints, selected, ready])
 
   // Fit the map to a new plan, and close any popup from the last one.
   useEffect(() => {
@@ -216,23 +218,30 @@ export default function MapView({ plan, selected, hour, showHeatmap, focus, onSe
   return (
     <div className="map-wrap">
       <div ref={container} className="map" role="region" aria-label="Map of the routes and the weather risk" />
-      {contextLost && (
-        <Alert
-          severity="warning"
-          className="map-notice"
-          sx={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', py: 0, zIndex: 2 }}
+      {(contextLost || baseMapFailed) && (
+        <Stack
+          spacing={1}
+          sx={{
+            position: 'absolute',
+            top: 10,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: 'max-content',
+            maxWidth: 'calc(100% - 24px)',
+            zIndex: 2,
+          }}
         >
-          The browser paused the map's graphics; it redraws when they're back. Reloading the page also restores it.
-        </Alert>
-      )}
-      {baseMapFailed && (
-        <Alert
-          severity="warning"
-          className="map-notice"
-          sx={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', py: 0, zIndex: 2 }}
-        >
-          The base map could not load; routes and weather still show.
-        </Alert>
+          {contextLost && (
+            <Alert severity="warning" className="map-notice" sx={{ py: 0 }}>
+              The browser paused the map's graphics; it redraws when they're back. Reloading the page also restores it.
+            </Alert>
+          )}
+          {baseMapFailed && (
+            <Alert severity="warning" className="map-notice" sx={{ py: 0 }}>
+              The base map could not load; routes and weather still show.
+            </Alert>
+          )}
+        </Stack>
       )}
     </div>
   )
@@ -392,10 +401,11 @@ function endMarkers(plan: Plan): maplibregl.Marker[] {
 /** A name tag on each route, at the point where it is furthest from the other routes, so tags do not stack. */
 function routeLabels(
   routes: PlannedRoute[],
+  points: [number, number][],
   selected: string,
   selectRef: React.RefObject<(name: string) => void>,
 ): maplibregl.Marker[] {
-  return routes.map((r) => {
+  return routes.map((r, i) => {
     const el = document.createElement('button')
     el.type = 'button'
     el.className = `route-label${r.name === selected ? ' selected' : ''}`
@@ -404,9 +414,18 @@ function routeLabels(
       e.stopPropagation()
       selectRef.current(r.name)
     })
-    const others = routes.filter((o) => o !== r).map((o) => sample(o.geometry, 200))
-    return new maplibregl.Marker({ element: el, anchor: 'bottom', offset: [0, -6] }).setLngLat(labelPoint(r, others))
+    return new maplibregl.Marker({ element: el, anchor: 'bottom', offset: [0, -6] }).setLngLat(points[i])
   })
+}
+
+/** Where each route's tag goes; it depends only on the routes, so it is worked out once per plan. */
+function labelPoints(routes: PlannedRoute[]): [number, number][] {
+  return routes.map((r) =>
+    labelPoint(
+      r,
+      routes.filter((o) => o !== r).map((o) => sample(o.geometry, 200)),
+    ),
+  )
 }
 
 function labelPoint(route: PlannedRoute, others: [number, number][][]): [number, number] {
