@@ -163,14 +163,18 @@ def test_service_errors_become_routing_errors_with_the_services_message():
     p = provider(lambda body: FakeResponse(502, None))
     with pytest.raises(RoutingError, match="HTTP 502"):
         p.routes((0.0, 0.0), (1.0, 1.0), 10_000)
-    assert len(p.session.calls) == 2  # a busy server gets one more try, then the error stands
+    assert len(p.session.calls) == 3  # a busy server gets two more tries, then the error stands
 
 
-def test_a_busy_server_is_retried_once():
-    answers = [FakeResponse(503, {"error": "The service is overloaded"}), FakeResponse(200, {"trip": FIXTURE["trip"]})]
-    p = provider(lambda body: answers.pop(0))
+def test_a_busy_server_is_tried_again_with_growing_pauses():
+    answers = [FakeResponse(503, {"error": "busy"}), FakeResponse(400, {"error": "The service is overloaded"}),
+               FakeResponse(200, {"trip": FIXTURE["trip"]})]
+    slept = []
+    p = ValhallaProvider("https://valhalla.example", "test-agent", session=FakeSession(lambda body: answers.pop(0)),
+                         sleep=slept.append)
     assert len(p._request([(1.0, 2.0), (3.0, 4.0)], load_lb=10_000, alternates=0)) == 1
-    assert not answers
+    assert not answers  # an "overloaded" answer is retried whatever its status
+    assert slept == [1.5, 3.0]
 
 
 def test_a_bad_request_is_not_retried():
@@ -319,4 +323,4 @@ def test_every_request_to_the_server_takes_a_turn():
                          session=FakeSession(lambda body: FakeResponse(503, {"error": "busy"})))
     with pytest.raises(RoutingError):
         p._request([(1.0, 2.0), (3.0, 4.0)], 10_000, 0)
-    assert len(waits) == 2  # the retry waits its turn too
+    assert len(waits) == 3  # every retry waits its turn too

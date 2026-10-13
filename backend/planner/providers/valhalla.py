@@ -46,8 +46,8 @@ SPUR_END_MARGIN_MI = 10.0
 SPLICE_TOLERANCE_MI = 0.1  # how close the next leg must stay to the last one to count as driving back over it
 SPLICE_MIN_MI = 0.5  # a shorter overlap at a waypoint is left alone
 LEG_LIMIT_MI = 925.0  # the public server refuses requests whose locations are over 1,500 km (932 mi) apart
-RETRY_STATUSES = (429, 502, 503, 504)  # a busy public server; worth one more try
-RETRY_DELAY_SECONDS = 1.5
+RETRY_STATUSES = (429, 502, 503, 504)  # a busy public server; worth trying again
+RETRY_DELAYS_SECONDS = (1.5, 3.0)  # two more tries, a little further apart each time
 
 
 class Throttle:
@@ -154,28 +154,30 @@ class ValhallaProvider:
             raise RoutingError(f"The routing service sent a route in an unexpected shape ({err!r}).") from err
 
     def _post(self, body: dict) -> dict:
-        for attempt in (1, 2):
+        delays = list(RETRY_DELAYS_SECONDS)
+        while True:
             self.throttle.wait()
             try:
                 resp = self.session.post(f"{self.base_url}/route", json=body, timeout=self.timeout, stream=True)
             except requests.RequestException as err:
                 raise RoutingError(f"The routing service could not be reached ({type(err).__name__}).") from err
-            if resp.status_code in RETRY_STATUSES and attempt == 1:
-                resp.close()
-                log.info("routing service busy (HTTP %s), retrying once", resp.status_code)
-                self.sleep(RETRY_DELAY_SECONDS)
-                continue
             try:
                 data = read_json(resp)
             except (SlowResponse, requests.RequestException) as err:
                 raise RoutingError(f"The routing service did not answer in time ({err}).") from err
-            except ValueError as err:
-                raise RoutingError(f"The routing service answered HTTP {resp.status_code} without JSON.") from err
-            if resp.status_code != 200 or not isinstance(data, dict) or "trip" not in data:
-                error = data.get("error") if isinstance(data, dict) else None
-                raise RoutingError(error or f"The routing service answered HTTP {resp.status_code}.")
-            return data
-        raise AssertionError("unreachable")
+            except ValueError:
+                data = None
+            if resp.status_code == 200 and isinstance(data, dict) and "trip" in data:
+                return data
+            error = data.get("error") if isinstance(data, dict) else None
+            busy = resp.status_code in RETRY_STATUSES or "overloaded" in str(error).lower()
+            if busy and delays:
+                log.info("routing service busy (HTTP %s: %s), trying again", resp.status_code, error)
+                self.sleep(delays.pop(0))
+                continue
+            if data is None:
+                raise RoutingError(f"The routing service answered HTTP {resp.status_code} without JSON.")
+            raise RoutingError(error or f"The routing service answered HTTP {resp.status_code}.")
 
 
 def parse_trip(trip: dict) -> RouteOption:
