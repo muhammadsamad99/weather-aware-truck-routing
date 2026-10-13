@@ -7,11 +7,19 @@ Valhalla returns the best route plus up to two alternates. When it returns fewer
 often have no alternate), more are made by routing through a waypoint pushed to one side of the best
 route's midpoint, and a candidate is kept only when it is not mostly the same road as one already kept.
 
+A waypoint (a detour's, or a long trip's split point) can land on a side road, so the legs drive up to it
+and back down ("a spur"). The waypoints are only there to steer the route, so where the next leg begins by
+driving back over the last one, the two are cut where they part and joined there. Valhalla's own alternates
+occasionally carry a spur too, so any candidate still running back over itself for more than MAX_SPUR_MI is
+dropped. Near the two ends a loop back can be genuine (reaching a stop on the far side of a divided road), so
+the first and last SPUR_END_MARGIN_MI are not checked.
+
 The public Valhalla server refuses a request whose locations are more than 1,500 km apart in a straight
 line. Longer trips, and every detour, are therefore routed as a chain of legs, each under LEG_LIMIT_MI,
 through points on the great circle between the ends, and the legs are joined into one route.
 """
 import logging
+import math
 import time
 from itertools import pairwise
 
@@ -24,10 +32,15 @@ log = logging.getLogger(__name__)
 
 TARE_LB = 35_000  # a typical empty tractor + 53 ft trailer
 LB_TO_METRIC_TON = 0.00045359237
-DETOUR_FRACTIONS = (0.12, 0.25)  # how far to push the waypoint, as a share of the best route's length
+# how far to push the waypoint, as a share of the best route's length; 0.18 only if the others were dropped
+DETOUR_FRACTIONS = (0.12, 0.25, 0.18)
 DETOUR_MIN_MI, DETOUR_MAX_MI = 5.0, 150.0
 MAX_DETOUR_TIME_RATIO = 1.6  # drop a detour that takes 60% longer than the best route
 MAX_OVERLAP = 0.8  # drop a route whose roads are 80% or more the same as one already kept
+MAX_SPUR_MI = 3.0  # drop a route that runs back over its own road for longer than this
+SPUR_END_MARGIN_MI = 10.0
+SPLICE_TOLERANCE_MI = 0.1  # how close the next leg must stay to the last one to count as driving back over it
+SPLICE_MIN_MI = 0.5  # a shorter overlap at a waypoint is left alone
 LEG_LIMIT_MI = 925.0  # the public server refuses requests whose locations are over 1,500 km (932 mi) apart
 RETRY_STATUSES = (429, 502, 503, 504)  # a busy public server; worth one more try
 RETRY_DELAY_SECONDS = 1.5
@@ -52,9 +65,9 @@ class ValhallaProvider:
         if not found:
             raise RoutingError("No truck route was found between these places.")
         primary = found[0]
-        kept = []
-        for option in found:
-            if all(overlap(option, other) < MAX_OVERLAP for other in kept):
+        kept = [primary]
+        for option in found[1:]:
+            if self._usable(option, kept):
                 kept.append(option)
         for fraction in DETOUR_FRACTIONS:
             for side in (90, -90):
@@ -67,11 +80,22 @@ class ValhallaProvider:
                     log.info("detour via %s skipped: %s", via, err)
                     continue
                 for option in candidates:
-                    if (option.total_seconds <= MAX_DETOUR_TIME_RATIO * primary.total_seconds
-                            and all(overlap(option, other) < MAX_OVERLAP for other in kept)):
+                    if option.total_seconds <= MAX_DETOUR_TIME_RATIO * primary.total_seconds and self._usable(
+                            option, kept):
                         kept.append(option)
         return [RouteOption(name=f"Route {chr(65 + i)}", points=r.points, miles=r.miles, seconds=r.seconds,
                             provider=self.name) for i, r in enumerate(kept[:count])]
+
+    @staticmethod
+    def _usable(option: RouteOption, kept: list[RouteOption]) -> bool:
+        """Not mostly the same road as a route already kept, and no spur."""
+        if any(overlap(option, other) >= MAX_OVERLAP for other in kept):
+            return False
+        spur = longest_spur(option)
+        if spur > MAX_SPUR_MI:
+            log.info("route of %.0f mi dropped: it runs back over itself for %.1f mi", option.total_miles, spur)
+            return False
+        return True
 
     def _chained(self, locations, load_lb):
         """One route through every location in order, requested one leg at a time (each leg under
@@ -145,16 +169,57 @@ def parse_trip(trip: dict) -> RouteOption:
 
 
 def join(legs: list[RouteOption]) -> RouteOption:
-    """Consecutive legs as one route: points end to end (each leg starts where the last one ended), times
-    added up, miles measured again."""
+    """Consecutive legs as one route (each leg starts where the last one ended): points end to end, times added
+    up, miles measured again, and any spur out to the waypoint between two legs cut off (see _splice)."""
     points: list[tuple[float, float]] = list(legs[0].points)
     seconds: list[float] = list(legs[0].seconds)
     for leg in legs[1:]:
-        offset = seconds[-1]
-        points.extend(leg.points[1:])
-        seconds.extend(offset + s for s in leg.seconds[1:])
+        points, seconds = _splice(points, seconds, list(leg.points), list(leg.seconds))
     return RouteOption(name="", points=tuple(points), miles=tuple(cumulative_miles(points)), seconds=tuple(seconds),
                        provider=legs[0].provider)
+
+
+def _splice(a_pts, a_secs, b_pts, b_secs):
+    """Leg b after leg a. If b starts by driving back along a's last stretch, the route instead leaves a at the
+    point where b turns off it: a up to there, then b from there on, with b's times shifted to follow on."""
+    cut_a, cut_b = len(a_pts) - 2, 0  # a's segment and b's point where they part
+    k, fraction = cut_a, 1.0
+    b_miles = cumulative_miles(b_pts)
+    for t in range(1, len(b_pts)):
+        # b drives backwards along a, so look at a's segments a little before the last match
+        k, distance, f = _nearest_segment(b_pts[t], a_pts, max(0, cut_a - 400), cut_a + 1)
+        if distance > SPLICE_TOLERANCE_MI:
+            break
+        cut_a, cut_b, fraction = k, t, f
+    if cut_b == 0 or b_miles[cut_b] < SPLICE_MIN_MI:
+        offset = a_secs[-1]
+        return a_pts + b_pts[1:], a_secs + [offset + s for s in b_secs[1:]]
+    at_cut = a_secs[cut_a] + fraction * (a_secs[cut_a + 1] - a_secs[cut_a])
+    points = a_pts[:cut_a + 1] + b_pts[cut_b:]
+    seconds = a_secs[:cut_a + 1] + [at_cut + (s - b_secs[cut_b]) for s in b_secs[cut_b:]]
+    return points, seconds
+
+
+def _nearest_segment(p, pts, first, last):
+    """(index, miles, fraction along) of the segment pts[i]..pts[i+1], for i in first..last-1, nearest to p."""
+    best = (first, float("inf"), 0.0)
+    for i in range(first, min(last, len(pts) - 1)):
+        d, f = _to_segment_mi(p, pts[i], pts[i + 1])
+        if d < best[1]:
+            best = (i, d, f)
+    return best
+
+
+def _to_segment_mi(p, a, b):
+    """Distance (miles) from p to segment a-b, and how far along a-b the nearest point is (0-1). Flat-earth
+    approximation, fine over a fraction of a mile."""
+    kx = 69.17 * math.cos(math.radians(p[0]))
+    ax, ay = (a[1] - p[1]) * kx, (a[0] - p[0]) * 69.05
+    bx, by = (b[1] - p[1]) * kx, (b[0] - p[0]) * 69.05
+    dx, dy = bx - ax, by - ay
+    length2 = dx * dx + dy * dy
+    f = 0.0 if length2 == 0 else min(1.0, max(0.0, -(ax * dx + ay * dy) / length2))
+    return math.hypot(ax + f * dx, ay + f * dy), f
 
 
 def detour_waypoint(route: RouteOption, fraction: float, side: int) -> tuple[float, float]:
@@ -175,6 +240,27 @@ def _cells(route: RouteOption, step_mi: float = 0.5) -> set[tuple[int, int]]:
             cells.add((round(lat * 100), round(lon * 100)))
             next_mark = mile + step_mi
     return cells
+
+
+def longest_spur(route: RouteOption, step_mi: float = 0.25, lookback_mi: float = 1.5) -> float:
+    """The longest unbroken stretch (miles) where the route runs over road it already drove more than
+    `lookback_mi` earlier: the way back down a spur. The ends of the route (SPUR_END_MARGIN_MI) are not checked."""
+    first_visit: dict[tuple[int, int], float] = {}
+    run = longest = 0.0
+    last_mile, next_mark = 0.0, 0.0
+    end = route.total_miles - SPUR_END_MARGIN_MI
+    for (lat, lon), mile in zip(route.points, route.miles, strict=True):
+        if mile < next_mark:
+            continue
+        cell = (round(lat * 100), round(lon * 100))
+        if SPUR_END_MARGIN_MI < mile < end and mile - first_visit.get(cell, mile) > lookback_mi:
+            run += mile - last_mile
+            longest = max(longest, run)
+        else:
+            run = 0.0
+        first_visit.setdefault(cell, mile)
+        last_mile, next_mark = mile, mile + step_mi
+    return longest
 
 
 def overlap(a: RouteOption, b: RouteOption) -> float:

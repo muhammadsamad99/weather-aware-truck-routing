@@ -6,7 +6,16 @@ import pytest
 
 from planner.geo import haversine_mi, offset_point
 from planner.providers.base import RoutingError
-from planner.providers.valhalla import LEG_LIMIT_MI, TARE_LB, ValhallaProvider, join, overlap, parse_trip
+from planner.providers.valhalla import (
+    LEG_LIMIT_MI,
+    MAX_SPUR_MI,
+    TARE_LB,
+    ValhallaProvider,
+    join,
+    longest_spur,
+    overlap,
+    parse_trip,
+)
 
 FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "valhalla_springfield_peoria.json").read_text())
 
@@ -175,3 +184,67 @@ def test_a_bad_request_is_not_retried():
     with pytest.raises(RoutingError):
         p._request([(1.0, 2.0), (3.0, 4.0)], load_lb=10_000, alternates=0)
     assert len(p.session.calls) == 1
+
+
+def with_spur(start, at_mile, spur_mi, total_mi=100):
+    """North for `total_mi`, with a side trip east of `spur_mi` and back at `at_mile`."""
+    before = line(start, 0, at_mile)
+    out = line(before[-1], 90, spur_mi)[1:]
+    back = list(reversed(out))[1:] + [before[-1]]
+    after = line(before[-1], 0, total_mi - at_mile)[1:]
+    return before + out + back + after
+
+
+def test_a_route_that_drives_up_a_side_road_and_back_has_a_spur():
+    r = parse_trip(trip(with_spur((40.0, -90.0), 50, 8), 7200))
+    assert longest_spur(r) == pytest.approx(8, abs=2)
+    assert longest_spur(parse_trip(trip(line((40.0, -90.0), 0, 100), 7200))) == 0
+
+
+def test_a_loop_back_near_either_end_is_not_a_spur():
+    near_start = parse_trip(trip(with_spur((40.0, -90.0), 2, 3), 7200))
+    near_end = parse_trip(trip(with_spur((40.0, -90.0), 99, 3), 7200))
+    assert longest_spur(near_start) == 0 and longest_spur(near_end) == 0
+
+
+def test_an_alternate_with_a_spur_is_dropped():
+    start = (40.0, -90.0)
+    north = line(start, 0, 100)
+    east_then_north = line(start, 90, 30) + line(offset_point(start, 90, 30), 0, 100)[1:]
+    spur = with_spur(offset_point(start, 270, 30), 50, MAX_SPUR_MI + 5)
+    west_with_spur = line(start, 270, 30) + spur[1:]
+    data = {"trip": trip(north, 6000), "alternates": [{"trip": trip(west_with_spur, 7000)},
+                                                      {"trip": trip(east_then_north, 7100)}]}
+    calls = []
+
+    def respond(body):
+        calls.append(body)
+        return FakeResponse(200, data) if "alternates" in body else FakeResponse(400, {"error": "no detours here"})
+
+    routes = provider(respond).routes(start, north[-1], 20_000)
+    assert [round(r.total_seconds) for r in routes] == [6000, 7100]
+
+
+def test_a_spur_out_to_the_waypoint_between_two_legs_is_cut_off():
+    start = (40.0, -90.0)
+    main_road = line(start, 0, 100)
+    junction = main_road[50]
+    waypoint = offset_point(junction, 90, 6)  # 6 mi up a side road
+    leg1 = main_road[:51] + line(junction, 90, 6)[1:]
+    leg2 = list(reversed(line(junction, 90, 6)))[:-1] + main_road[50:]
+    a, b = parse_trip(trip(leg1, 3600)), parse_trip(trip(leg2, 3600))
+    assert a.points[-1] == pytest.approx(waypoint) and b.points[0] == pytest.approx(waypoint)
+    joined = join([a, b])
+    assert joined.total_miles == pytest.approx(100, abs=0.5)  # not 112
+    assert longest_spur(joined) == 0
+    # time: leg 1 up to the junction, then leg 2 from the junction (each leg drives at a steady speed)
+    assert joined.total_seconds == pytest.approx(3600 * 50 / 56 + 3600 * 50 / 56, rel=0.01)
+    assert all(y >= x for x, y in pairwise(joined.seconds))
+
+
+def test_legs_that_carry_straight_on_are_joined_untouched():
+    a = parse_trip(trip(line((40.0, -90.0), 0, 30), 1800))
+    b = parse_trip(trip(line(a.points[-1], 20, 30), 1800))
+    joined = join([a, b])
+    assert len(joined.points) == len(a.points) + len(b.points) - 1
+    assert joined.total_seconds == pytest.approx(3600)
