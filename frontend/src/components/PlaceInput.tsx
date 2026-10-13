@@ -1,4 +1,6 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import Autocomplete from '@mui/material/Autocomplete'
+import TextField from '@mui/material/TextField'
+import { useEffect, useState } from 'react'
 import { searchPlaces } from '../api'
 import type { Place, PlaceInputValue } from '../types'
 
@@ -13,33 +15,37 @@ interface Props {
   placeholder?: string
 }
 
-/** A text box with place suggestions. Typing clears any picked place; picking one keeps its coordinates. */
+/**
+ * A place box with suggestions. Typing clears any picked place (the text is looked up when planning);
+ * picking a suggestion keeps its coordinates.
+ */
 export default function PlaceInput({ label, value, onChange, error, placeholder }: Props) {
-  const id = useId()
   const [suggestions, setSuggestions] = useState<Place[]>([])
-  const [open, setOpen] = useState(false)
-  const [active, setActive] = useState(-1)
+  const [searching, setSearching] = useState(false)
   const [lookupFailed, setLookupFailed] = useState(false)
-  const blurTimer = useRef<number>(undefined)
 
   const query = value.place ? '' : value.text.trim()
 
   useEffect(() => {
     if (query.length < MIN_CHARS) {
       setSuggestions([])
+      setSearching(false)
       setLookupFailed(false)
       return
     }
     const controller = new AbortController()
+    setSearching(true)
     const timer = window.setTimeout(() => {
       searchPlaces(query, controller.signal)
         .then((places) => {
           setSuggestions(places)
-          setActive(-1)
           setLookupFailed(false)
         })
         .catch((err) => {
           if (err.name !== 'AbortError') setLookupFailed(true)
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setSearching(false)
         })
     }, DEBOUNCE_MS)
     return () => {
@@ -48,84 +54,42 @@ export default function PlaceInput({ label, value, onChange, error, placeholder 
     }
   }, [query])
 
-  const pick = (place: Place) => {
-    onChange({ text: place.label, place })
-    setOpen(false)
-    setSuggestions([])
-  }
+  const hint = value.place
+    ? `${value.place.lat.toFixed(4)}, ${value.place.lon.toFixed(4)}`
+    : lookupFailed
+      ? 'Suggestions are unavailable; the place will be looked up when you plan.'
+      : undefined
 
-  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (!open || suggestions.length === 0) return
-    if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      setActive((a) => (a + 1) % suggestions.length)
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      setActive((a) => (a <= 0 ? suggestions.length - 1 : a - 1))
-    } else if (e.key === 'Enter' && active >= 0) {
-      e.preventDefault()
-      pick(suggestions[active])
-    } else if (e.key === 'Escape') {
-      setOpen(false)
-    }
-  }
-
-  const listId = `${id}-list`
-  const errorId = `${id}-error`
-  const showList = open && suggestions.length > 0
   return (
-    <div className="field place-input">
-      <label htmlFor={id}>{label}</label>
-      <input
-        id={id}
-        type="text"
-        autoComplete="off"
-        placeholder={placeholder}
-        value={value.text}
-        aria-invalid={Boolean(error)}
-        aria-describedby={error ? errorId : undefined}
-        role="combobox"
-        aria-expanded={showList}
-        aria-controls={showList ? listId : undefined}
-        aria-autocomplete="list"
-        aria-activedescendant={showList && active >= 0 ? `${listId}-${active}` : undefined}
-        onChange={(e) => {
-          onChange({ text: e.target.value, place: null })
-          setOpen(true)
-        }}
-        onFocus={() => setOpen(true)}
-        onBlur={() => {
-          blurTimer.current = window.setTimeout(() => setOpen(false), 150)
-        }}
-        onKeyDown={onKeyDown}
-      />
-      {showList && (
-        <ul className="suggestions" id={listId} role="listbox">
-          {suggestions.map((s, i) => (
-            <li
-              key={`${s.label}-${s.lat}-${s.lon}`}
-              id={`${listId}-${i}`}
-              role="option"
-              aria-selected={i === active}
-              className={i === active ? 'active' : undefined}
-              onMouseDown={(e) => {
-                e.preventDefault() // keep focus, so the blur timer does not close the list first
-                window.clearTimeout(blurTimer.current)
-                pick(s)
-              }}
-            >
-              {s.label}
-            </li>
-          ))}
-        </ul>
+    <Autocomplete<Place, false, false, true>
+      freeSolo
+      options={suggestions}
+      value={value.place}
+      inputValue={value.text}
+      filterOptions={(options) => options} // the server already matched them
+      loading={searching}
+      loadingText="Looking up places…"
+      getOptionLabel={(o) => (typeof o === 'string' ? o : o.label)}
+      getOptionKey={(o) => (typeof o === 'string' ? o : `${o.label}|${o.lat},${o.lon}`)}
+      isOptionEqualToValue={(a, b) => a.lat === b.lat && a.lon === b.lon}
+      // Picking a suggestion also reports an input change (reason 'selectOption', just before onChange);
+      // only typing and clearing drop the picked place.
+      onInputChange={(_, text, reason) => {
+        if (reason === 'input' || reason === 'clear') onChange({ text, place: null })
+      }}
+      onChange={(_, picked) => {
+        if (picked && typeof picked !== 'string') onChange({ text: picked.label, place: picked })
+        else if (picked === null) onChange({ text: '', place: null })
+      }}
+      renderInput={(params) => (
+        <TextField
+          {...params}
+          label={label}
+          placeholder={placeholder}
+          error={Boolean(error)}
+          helperText={error || hint}
+        />
       )}
-      {value.place && <div className="hint">{value.place.lat.toFixed(4)}, {value.place.lon.toFixed(4)}</div>}
-      {!value.place && lookupFailed && <div className="hint">Suggestions are unavailable; the place will be looked up when you plan.</div>}
-      {error && (
-        <div className="field-error" id={errorId}>
-          {error}
-        </div>
-      )}
-    </div>
+    />
   )
 }

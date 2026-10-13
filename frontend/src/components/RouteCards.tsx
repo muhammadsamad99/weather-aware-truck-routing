@@ -1,3 +1,11 @@
+import Box from '@mui/material/Box'
+import Card from '@mui/material/Card'
+import CardActionArea from '@mui/material/CardActionArea'
+import Chip from '@mui/material/Chip'
+import Stack from '@mui/material/Stack'
+import Tooltip from '@mui/material/Tooltip'
+import Typography from '@mui/material/Typography'
+import { memo } from 'react'
 import { LEVELS } from '../levels'
 import { formatDateTime, formatDuration, formatMiles } from '../format'
 import type { PlannedRoute } from '../types'
@@ -9,51 +17,81 @@ interface Props {
 }
 
 /** One card per route, best first: distance, time, arrival and the miles at each risk level. */
-export default function RouteCards({ routes, selected, onSelect }: Props) {
+function RouteCards({ routes, selected, onSelect }: Props) {
   const ordered = [...routes].sort((a, b) => a.rank - b.rank)
   return (
-    <ol className="route-cards">
-      {ordered.map((r) => (
-        <li key={r.name}>
-          <button
-            type="button"
-            className={`route-card${r.name === selected ? ' selected' : ''}${r.recommended ? ' recommended' : ''}`}
-            aria-pressed={r.name === selected}
-            onClick={() => onSelect(r.name)}
-          >
-            <div className="card-head">
-              <span className="rank">#{r.rank}</span>
-              <span className="name">{r.name}</span>
-              {r.recommended && <span className="badge">Recommended</span>}
-            </div>
-            <div className="card-stats">
-              <span>{formatMiles(r.miles)}</span>
-              <span>{formatDuration(r.seconds)}</span>
-              <span title="Arrival">arrives {formatDateTime(r.arrival)}</span>
-            </div>
-            <RiskBar route={r} />
-            <dl className="card-risk">
-              <div>
-                <dt>No Travel</dt>
-                <dd>{formatMiles(r.risk.no_travel_miles)}</dd>
-              </div>
-              <div>
-                <dt>Severe</dt>
-                <dd>{formatMiles(r.risk.severe_miles)}</dd>
-              </div>
-              <div>
-                <dt>High</dt>
-                <dd>{formatMiles(r.risk.high_miles)}</dd>
-              </div>
-              <div>
-                <dt>Avg risk</dt>
-                <dd>{r.risk.average.toFixed(2)}</dd>
-              </div>
-            </dl>
-          </button>
-        </li>
-      ))}
-    </ol>
+    <Stack component="ol" spacing={1} sx={{ listStyle: 'none', m: 0, p: 0 }}>
+      {ordered.map((r) => {
+        const isSelected = r.name === selected
+        return (
+          <li key={r.name}>
+            <Card
+              variant="outlined"
+              sx={{
+                borderColor: isSelected ? 'primary.main' : 'divider',
+                boxShadow: isSelected ? (t) => `inset 0 0 0 1px ${t.palette.primary.main}` : 'none',
+              }}
+            >
+              {/* A button holds only phrasing content, so the card's parts are spans. */}
+              <CardActionArea
+                className="route-card"
+                aria-pressed={isSelected}
+                onClick={() => onSelect(r.name)}
+                sx={{ p: 1.5, display: 'block' }}
+              >
+                <Box component="span" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Typography component="span" sx={{ fontWeight: 700, color: 'text.secondary' }}>
+                    #{r.rank}
+                  </Typography>
+                  <Typography component="span" sx={{ fontWeight: 600 }}>
+                    {r.name}
+                  </Typography>
+                  {r.recommended && (
+                    <Chip component="span" size="small" color="primary" label="Recommended" sx={{ ml: 'auto' }} />
+                  )}
+                </Box>
+                <Box component="span" sx={{ display: 'flex', flexWrap: 'wrap', columnGap: 1.5, mt: 0.5 }}>
+                  <Typography component="span" variant="body2">
+                    {formatMiles(r.miles)}
+                  </Typography>
+                  <Typography component="span" variant="body2">
+                    {formatDuration(r.seconds)}
+                  </Typography>
+                  <Typography component="span" variant="body2" color="text.secondary">
+                    arrives {formatDateTime(r.arrival)}
+                  </Typography>
+                </Box>
+                <RiskBar route={r} />
+                <Box
+                  component="span"
+                  sx={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', mt: 0.75, fontVariantNumeric: 'tabular-nums' }}
+                >
+                  <Figure label="No Travel" value={formatMiles(r.risk.no_travel_miles)} />
+                  <Figure label="Severe" value={formatMiles(r.risk.severe_miles)} />
+                  <Figure label="High" value={formatMiles(r.risk.high_miles)} />
+                  <Figure label="Avg risk" value={r.risk.average.toFixed(2)} />
+                </Box>
+              </CardActionArea>
+            </Card>
+          </li>
+        )
+      })}
+    </Stack>
+  )
+}
+
+export default memo(RouteCards)
+
+function Figure({ label, value }: { label: string; value: string }) {
+  return (
+    <Box component="span" sx={{ display: 'block' }}>
+      <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+        {label}
+      </Typography>
+      <Typography component="span" variant="body2" sx={{ display: 'block', fontWeight: 600 }}>
+        {value}
+      </Typography>
+    </Box>
   )
 }
 
@@ -62,10 +100,18 @@ function RiskBar({ route }: { route: PlannedRoute }) {
   const parts = LEVELS.map((l) => ({ ...l, miles: route.risk.miles_by_level[l.name] ?? 0 })).filter((p) => p.miles > 0)
   const label = parts.map((p) => `${p.name} ${Math.round(p.miles)} mi`).join(', ')
   return (
-    <div className="risk-bar" role="img" aria-label={`Miles by risk level: ${label}`} title={label}>
+    <Box
+      component="span"
+      role="img"
+      aria-label={`Miles by risk level: ${label}`}
+      sx={{ display: 'flex', height: 8, mt: 1, borderRadius: 1, overflow: 'hidden', bgcolor: 'grey.100' }}
+    >
       {parts.map((p) => (
-        <span key={p.name} style={{ width: `${(p.miles / total) * 100}%`, background: p.color }} />
+        <Tooltip key={p.name} title={`${p.name}: ${Math.round(p.miles)} mi`} disableInteractive>
+          {/* width and colour vary per route, so they are inline styles rather than generated classes */}
+          <span style={{ width: `${(p.miles / total) * 100}%`, background: p.color }} />
+        </Tooltip>
       ))}
-    </div>
+    </Box>
   )
 }

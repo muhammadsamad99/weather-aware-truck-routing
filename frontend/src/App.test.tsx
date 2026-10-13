@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+import AppProviders from './AppProviders'
 import { MapBoundary } from './components/MapFallback'
 import MapView from './components/MapView'
 import type { Plan } from './types'
@@ -76,17 +77,27 @@ const PLAN: Plan = {
   heatmap: { start: T0, hours: 48, step_deg: 0.2, points: [[-90, 40]], frames: Array.from({ length: 49 }, () => [0]) },
 }
 
+const CHICAGO = { label: 'Chicago, Illinois, US', lat: 41.8756, lon: -87.6244 }
+const api = vi.hoisted(() => ({ suggestions: [] as unknown[], planReply: null as null | { status: number; body: unknown } }))
+
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+
 beforeEach(() => {
   mapStart.error = null
+  api.suggestions = []
+  api.planReply = null
   vi.spyOn(console, 'warn').mockImplementation(() => {})
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string) => {
-      const body = url.startsWith('/api/geocode') ? { results: [] } : PLAN
-      return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      if (url.startsWith('/api/geocode')) return json({ results: api.suggestions })
+      return api.planReply ? json(api.planReply.body, api.planReply.status) : json(PLAN)
     }),
   )
 })
+
+const fetchCalls = () => (fetch as unknown as { mock: { calls: [string, RequestInit?][] } }).mock.calls
 
 afterEach(() => {
   cleanup()
@@ -104,24 +115,24 @@ async function planATrip() {
 describe('without WebGL', () => {
   it('keeps the form and results, says why the map is missing, and drops the map-only controls', async () => {
     mapStart.error = new Error('Failed to initialize WebGL')
-    const { container } = render(<App />)
+    const { container } = render(<App />, { wrapper: AppProviders })
     expect(screen.getByText("The map can't be drawn in this browser.")).toBeTruthy()
 
     await planATrip()
     expect(container.querySelectorAll('.route-card')).toHaveLength(1)
     expect(container.querySelectorAll('.checkpoints tbody tr')).toHaveLength(2)
     expect(container.querySelectorAll('.checkpoints tbody tr.clickable')).toHaveLength(0)
-    expect(screen.queryByRole('checkbox', { name: /Risk heatmap/ })).toBeNull()
+    expect(screen.queryByRole('switch', { name: /Risk heatmap/ })).toBeNull()
   })
 })
 
 describe('with a working map', () => {
   it('shows the heatmap control and lets checkpoint rows find the checkpoint on the map', async () => {
-    const { container } = render(<App />)
+    const { container } = render(<App />, { wrapper: AppProviders })
     expect(screen.queryByRole('note')).toBeNull()
 
     await planATrip()
-    expect(screen.getByRole('checkbox', { name: /Risk heatmap/ })).toBeTruthy()
+    expect(screen.getByRole('switch', { name: /Risk heatmap/ })).toBeTruthy()
     await waitFor(() => expect(container.querySelectorAll('.checkpoints tbody tr.clickable')).toHaveLength(2))
   })
 })
@@ -129,7 +140,7 @@ describe('with a working map', () => {
 describe('when the map fails for another reason', () => {
   it('says the map stopped working without blaming WebGL', () => {
     mapStart.error = new Error("Invalid type: 'container' must be a String or HTMLElement.")
-    render(<App />)
+    render(<App />, { wrapper: AppProviders })
     expect(screen.getByText('The map stopped working.')).toBeTruthy()
     expect(screen.queryByText(/WebGL/)).toBeNull()
     expect(screen.getByLabelText('Origin')).toBeTruthy()
@@ -172,5 +183,56 @@ describe('the map on its own', () => {
     )
     expect(screen.getByText("The map can't be drawn in this browser.")).toBeTruthy()
     expect(onUnavailable).toHaveBeenCalledOnce()
+  })
+})
+
+describe('the place boxes', () => {
+  it('search only from three letters, once per pause in typing', async () => {
+    render(<App />, { wrapper: AppProviders })
+    const origin = screen.getByRole('combobox', { name: 'Origin' })
+    fireEvent.change(origin, { target: { value: 'Ch' } })
+    await new Promise((r) => setTimeout(r, 500))
+    expect(fetchCalls().filter(([u]) => u.startsWith('/api/geocode'))).toHaveLength(0)
+    fireEvent.change(origin, { target: { value: 'Chic' } })
+    fireEvent.change(origin, { target: { value: 'Chica' } })
+    await waitFor(() => expect(fetchCalls().filter(([u]) => u.startsWith('/api/geocode'))).toHaveLength(1))
+    expect(fetchCalls()[0][0]).toBe('/api/geocode?q=Chica')
+  })
+
+  it('keep a picked place, drop it when typed over, and send picked places as coordinates', async () => {
+    api.suggestions = [CHICAGO]
+    render(<App />, { wrapper: AppProviders })
+    const origin = screen.getByRole('combobox', { name: 'Origin' })
+    fireEvent.change(origin, { target: { value: 'Chica' } })
+    fireEvent.click(await screen.findByRole('option', { name: 'Chicago, Illinois, US' }))
+    expect(screen.getByText('41.8756, -87.6244')).toBeTruthy()
+    expect((origin as HTMLInputElement).value).toBe('Chicago, Illinois, US')
+
+    fireEvent.change(origin, { target: { value: 'Chicago, Illinois, US!' } })
+    expect(screen.queryByText('41.8756, -87.6244')).toBeNull()
+    fireEvent.change(origin, { target: { value: 'Chica' } })
+    fireEvent.click(await screen.findByRole('option', { name: 'Chicago, Illinois, US' }))
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Destination' }), { target: { value: 'Denver, CO' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Plan routes' }))
+    await screen.findByText('Only one route was found.')
+    const [, init] = fetchCalls().find(([u]) => u === '/api/plan')!
+    const sent = JSON.parse(String(init?.body))
+    expect(sent.origin).toEqual(CHICAGO)
+    expect(sent.destination).toBe('Denver, CO')
+  })
+})
+
+describe('a re-plan that fails', () => {
+  it('keeps the last results on screen and says so', async () => {
+    const { container } = render(<App />, { wrapper: AppProviders })
+    await planATrip()
+    api.planReply = { status: 400, body: { error: "No place matches 'Atlantis'." } }
+    fireEvent.change(screen.getByLabelText('Origin'), { target: { value: 'Atlantis' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Plan routes' }))
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      "No place matches 'Atlantis'. The map still shows the last plan.",
+    )
+    expect(container.querySelectorAll('.route-card')).toHaveLength(1)
   })
 })

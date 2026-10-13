@@ -1,10 +1,13 @@
 import * as maplibregl from 'maplibre-gl'
 import type { ExpressionSpecification, GeoJSONSource, MapLayerMouseEvent, StyleSpecification } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import './MapView.css'
+import Alert from '@mui/material/Alert'
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { bounds, haversineMi, positionAt } from '../geometry'
-import { levelColor, levelColorExpression } from '../levels'
+import { levelColor, levelColorExpression, levelText } from '../levels'
+import { brand } from '../theme'
 import { formatDateTime, formatDuration, formatMiles } from '../format'
 import type { Checkpoint, Plan, PlannedRoute } from '../types'
 import { mapProblem, type MapProblem } from '../mapProblem'
@@ -19,10 +22,10 @@ const BASE_STYLE = 'https://tiles.openfreemap.org/styles/liberty'
 const FALLBACK_STYLE: StyleSpecification = {
   version: 8,
   sources: {},
-  layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#eef1f4' } }],
+  layers: [{ id: 'background', type: 'background', paint: { 'background-color': brand.mapBackground } }],
 }
-const SELECTED_COLOR = '#1d4ed8'
-const OTHER_COLOR = '#7b8698'
+const SELECTED_COLOR = brand.primary
+const OTHER_COLOR = brand.otherRoute
 const METERS_PER_DEGREE = 111_320
 const METERS_PER_PIXEL_AT_ZOOM_0 = 78_271.517 // 512 px tiles, at the equator
 
@@ -150,7 +153,9 @@ export default function MapView({ plan, selected, hour, showHeatmap, focus, onSe
     if (!map || !plan) return
     popup.current?.remove()
     const wide = map.getContainer().clientWidth > 700
-    map.fitBounds(bounds(plan.routes), { padding: wide ? 70 : 30, duration: 800, maxZoom: 11 })
+    // extra room at the bottom, where the heatmap control floats over the map
+    const padding = wide ? { top: 60, right: 60, left: 60, bottom: 160 } : { top: 30, right: 30, left: 30, bottom: 150 }
+    map.fitBounds(bounds(plan.routes), { padding, duration: 800, maxZoom: 11 })
   }, [plan])
 
   // The heatmap: every frame is built once per plan, so moving the slider only swaps data.
@@ -205,7 +210,15 @@ export default function MapView({ plan, selected, hour, showHeatmap, focus, onSe
   return (
     <div className="map-wrap">
       <div ref={container} className="map" role="region" aria-label="Map of the routes and the weather risk" />
-      {baseMapFailed && <div className="map-notice">The base map could not load; routes and weather still show.</div>}
+      {baseMapFailed && (
+        <Alert
+          severity="warning"
+          className="map-notice"
+          sx={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', py: 0, zIndex: 2 }}
+        >
+          The base map could not load; routes and weather still show.
+        </Alert>
+      )}
     </div>
   )
 }
@@ -324,6 +337,7 @@ function showPopup(map: maplibregl.Map, popup: maplibregl.Popup, route: string, 
   const chip = document.createElement('span')
   chip.className = 'level-chip'
   chip.style.background = levelColor(cp.level)
+  chip.style.color = levelText(cp.level)
   chip.textContent = cp.level_name
   const title = document.createElement('strong')
   title.textContent = `${route} · mile ${cp.mile.toFixed(0)}`

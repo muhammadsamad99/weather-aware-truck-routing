@@ -1,18 +1,42 @@
+import Alert from '@mui/material/Alert'
+import Box from '@mui/material/Box'
+import CircularProgress from '@mui/material/CircularProgress'
+import Link from '@mui/material/Link'
+import Stack from '@mui/material/Stack'
+import Typography from '@mui/material/Typography'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, planTrip } from './api'
 import CheckpointTable from './components/CheckpointTable'
-import HeatmapControl from './components/HeatmapControl'
 import Legend from './components/Legend'
-import { MapBoundary } from './components/MapFallback'
-import MapView, { type Focus } from './components/MapView'
+import MapPane from './components/MapPane'
+import type { Focus } from './components/MapView'
+import Recommendation from './components/Recommendation'
 import RouteCards from './components/RouteCards'
 import TripForm, { MAX_LOAD_LB } from './components/TripForm'
-import { formatDateTime, formatLoad, nextHourLocal } from './format'
+import { nextHourLocal } from './format'
 import type { Plan, TripForm as TripFormValues } from './types'
 
 const EXAMPLE: Pick<TripFormValues, 'origin' | 'destination'> = {
   origin: { text: 'Chicago, IL', place: null },
   destination: { text: 'Denver, CO', place: null },
+}
+
+const CREDITS: [string, string][] = [
+  ['Valhalla', 'https://valhalla.github.io/valhalla/'],
+  ['FOSSGIS', 'https://www.fossgis.de/'],
+  ['OpenStreetMap contributors', 'https://www.openstreetmap.org/copyright'],
+  ['fix the map', 'https://www.openstreetmap.org/fixthemap'],
+  ['Open-Meteo.com', 'https://open-meteo.com/'],
+  ['Photon', 'https://photon.komoot.io/'],
+  ['OpenFreeMap', 'https://openfreemap.org/'],
+]
+const credit = (name: string) => {
+  const url = CREDITS.find(([n]) => n === name)![1]
+  return (
+    <Link href={url} color="inherit" underline="always">
+      {name}
+    </Link>
+  )
 }
 
 export default function App() {
@@ -25,9 +49,6 @@ export default function App() {
   }))
   const [plan, setPlan] = useState<Plan | null>(null)
   const [selected, setSelected] = useState('')
-  const [hour, setHour] = useState(0)
-  const [showHeatmap, setShowHeatmap] = useState(true)
-  const [playing, setPlaying] = useState(false)
   const [focus, setFocus] = useState<Focus | null>(null)
   const [mapWorks, setMapWorks] = useState(true)
   const mapFailed = useCallback(() => setMapWorks(false), [])
@@ -68,8 +89,6 @@ export default function App() {
       )
       setPlan(result)
       setSelected(result.recommended)
-      setHour(0)
-      setPlaying(false)
       setFocus(null)
     } catch (err) {
       if ((err as Error).name === 'AbortError') return
@@ -88,114 +107,115 @@ export default function App() {
   const onFocus = useCallback((index: number) => setFocus({ route: selected, index, nonce: Date.now() }), [selected])
 
   return (
-    <div className="app">
-      <aside className="panel">
-        <header>
-          <h1>Weather-Aware Truck Routing</h1>
-          <p>Three routes, the forecast at each checkpoint when the truck gets there, and the safest way to go.</p>
-        </header>
+    <Box
+      sx={(theme) => ({
+        display: 'grid',
+        // minmax(0, …): a column must not grow to fit its widest content (the checkpoint table scrolls instead)
+        gridTemplateColumns: 'minmax(0, 1fr)',
+        gridTemplateRows: 'auto 70vh auto',
+        gridTemplateAreas: '"panel" "map" "footer"',
+        [theme.breakpoints.up('md')]: {
+          gridTemplateColumns: 'minmax(360px, 420px) minmax(0, 1fr)',
+          gridTemplateRows: '1fr auto',
+          gridTemplateAreas: '"panel map" "footer map"',
+          height: '100vh',
+          '@supports (height: 100dvh)': { height: '100dvh' },
+        },
+      })}
+    >
+      <Box
+        component="aside"
+        sx={{
+          gridArea: 'panel',
+          minWidth: 0,
+          overflowY: { md: 'auto' },
+          scrollbarGutter: { md: 'stable' },
+          borderRight: { md: 1 },
+          borderColor: { md: 'divider' },
+          px: 2.5,
+          pt: 2.5,
+          pb: 2,
+        }}
+      >
+        <Stack spacing={2}>
+          <header>
+            <Typography variant="h1">Weather-Aware Truck Routing</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+              Three routes, the forecast at each checkpoint when the truck gets there, and the safest way to go.
+            </Typography>
+          </header>
 
-        <TripForm values={form} onChange={setForm} onSubmit={submit} busy={busy} fieldErrors={fieldErrors} />
-        {!plan && !busy && (
-          <button type="button" className="link" onClick={() => setForm({ ...form, ...EXAMPLE })}>
-            Try an example: Chicago, IL → Denver, CO
-          </button>
-        )}
+          <TripForm values={form} onChange={setForm} onSubmit={submit} busy={busy} fieldErrors={fieldErrors} />
+          {!plan && !busy && (
+            <Link
+              component="button"
+              type="button"
+              variant="body2"
+              onClick={() => setForm((f) => ({ ...f, ...EXAMPLE }))}
+              sx={{ alignSelf: 'flex-start' }}
+            >
+              Try an example: Chicago, IL → Denver, CO
+            </Link>
+          )}
 
-        {busy && (
-          <div className="status" role="status">
-            <span className="spinner" aria-hidden="true" /> Routing and checking the forecast… {elapsed} s
-            {elapsed >= 15 && (
-              <span className="hint">
-                Long trips take longer: the free routing and weather services are asked at a limited pace.
-              </span>
-            )}
-          </div>
-        )}
-        {error && (
-          <div className="error" role="alert">
-            {error}
-          </div>
-        )}
-
-        {plan && (
-          <section className="results" aria-label="Results">
-            <div className="recommendation">
-              <div className="rec-title">
-                Recommended: <strong>{plan.recommended}</strong>
-              </div>
-              <p>{plan.reason}</p>
-              {plan.tradeoff && <p>{plan.tradeoff}</p>}
-              <p className="trip-summary">
-                {plan.origin.label} → {plan.destination.label}
-                <br />
-                Leaves {formatDateTime(plan.departure)} · {formatLoad(plan.load_lb)} · checked every {plan.interval_mi} mi
-              </p>
-              {plan.weather_grid_deg > 0.1 && (
-                <p className="trip-summary">
-                  A long trip: the forecast is read on a {plan.weather_grid_deg}° grid (about{' '}
-                  {Math.round(plan.weather_grid_deg * 69)} mi) to stay within the weather service's limits.
-                </p>
+          {busy && (
+            <Box role="status">
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                <CircularProgress size={16} aria-hidden="true" />
+                <Typography variant="body2" color="text.secondary">
+                  Routing and checking the forecast… {elapsed} s
+                </Typography>
+              </Stack>
+              {elapsed >= 15 && (
+                <Typography variant="caption" component="p" color="text.secondary" sx={{ mt: 0.5 }}>
+                  Long trips take longer: the free routing and weather services are asked at a limited pace.
+                </Typography>
               )}
-            </div>
-            <RouteCards routes={plan.routes} selected={selected} onSelect={setSelected} />
-            {selectedRoute && (
-              <CheckpointTable
-                route={selectedRoute}
-                intervalMi={plan.interval_mi}
-                onFocus={mapWorks ? onFocus : undefined}
-              />
-            )}
-          </section>
-        )}
+            </Box>
+          )}
+          {error && <Alert severity="error">{error}</Alert>}
 
-        <Legend />
-        <footer>
-          Routes: <a href="https://valhalla.github.io/valhalla/">Valhalla</a> on the{' '}
-          <a href="https://www.fossgis.de/">FOSSGIS</a> server · Map data ©{' '}
-          <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> (
-          <a href="https://www.openstreetmap.org/fixthemap">fix the map</a>) · Weather data by{' '}
-          <a href="https://open-meteo.com/">Open-Meteo.com</a> · Places:{' '}
-          <a href="https://photon.komoot.io/">Photon</a> · Map: <a href="https://openfreemap.org/">OpenFreeMap</a>
-        </footer>
-      </aside>
+          {plan && (
+            <Stack component="section" spacing={1.5} aria-label="Results">
+              <Recommendation plan={plan} />
+              <RouteCards routes={plan.routes} selected={selected} onSelect={setSelected} />
+              {selectedRoute && (
+                <CheckpointTable
+                  route={selectedRoute}
+                  intervalMi={plan.interval_mi}
+                  onFocus={mapWorks ? onFocus : undefined}
+                />
+              )}
+            </Stack>
+          )}
 
-      <main className="map-area">
-        <MapBoundary onError={mapFailed}>
-          <MapView
-            plan={plan}
-            selected={selected}
-            hour={hour}
-            showHeatmap={showHeatmap}
-            focus={focus}
-            onSelectRoute={setSelected}
-            onUnavailable={mapFailed}
-          />
-        </MapBoundary>
-        {plan && mapWorks && (
-          <HeatmapControl
-            start={plan.heatmap.start}
-            hours={plan.heatmap.hours}
-            spacingMi={gridSpacingMi(plan)}
-            hour={hour}
-            onHour={setHour}
-            visible={showHeatmap}
-            onVisible={setShowHeatmap}
-            playing={playing}
-            onPlaying={setPlaying}
-          />
-        )}
-      </main>
-    </div>
+          <Legend />
+        </Stack>
+      </Box>
+
+      <Box component="main" sx={{ gridArea: 'map', position: 'relative', minHeight: 0 }} className="map-area">
+        <MapPane
+          plan={plan}
+          selected={selected}
+          focus={focus}
+          onSelectRoute={setSelected}
+          mapWorks={mapWorks}
+          onMapFailed={mapFailed}
+        />
+      </Box>
+
+      <Box
+        component="footer"
+        sx={{ gridArea: 'footer', px: 2.5, py: 1.5, borderRight: { md: 1 }, borderTop: 1, borderColor: 'divider' }}
+      >
+        <Typography variant="caption" component="p" color="text.secondary">
+          Routes: {credit('Valhalla')} on the {credit('FOSSGIS')} server · Map data © {credit('OpenStreetMap contributors')}{' '}
+          ({credit('fix the map')}) · Weather data by {credit('Open-Meteo.com')} · Places: {credit('Photon')} · Map:{' '}
+          {credit('OpenFreeMap')}
+        </Typography>
+      </Box>
+    </Box>
   )
-}
-
-/** The heatmap grid's spacing in miles: [east-west, north-south] (a degree of longitude shrinks with latitude). */
-function gridSpacingMi(plan: Plan): [number, number] {
-  const lats = plan.heatmap.points.map((p) => p[1])
-  const midLat = lats.length ? (Math.min(...lats) + Math.max(...lats)) / 2 : 39
-  const northSouth = plan.heatmap.step_deg * 69
-  return [Math.round(northSouth * Math.cos((midLat * Math.PI) / 180)), Math.round(northSouth)]
 }
 
 function validate(form: TripFormValues): Record<string, string> {
