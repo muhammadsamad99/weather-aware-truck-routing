@@ -54,6 +54,8 @@ React + TypeScript + MapLibre on the front end, Django + Django REST Framework b
   - it doesn't run back over itself for more than 3 miles.
 - A waypoint can land on a side road, so the route would drive up to it and back. Where that happens the
   legs are joined where they part.
+- The routes are cached for 6 hours per trip and exact load, because the truck's weight decides which roads
+  and bridges it may use.
 
 ### Weather at each checkpoint's ETA
 
@@ -65,6 +67,11 @@ The forecast is [Open-Meteo](https://open-meteo.com) hourly data:
 
 Rain and snow at a timestamp are the totals for the hour before it. So a truck at a checkpoint at 10:20
 gets rain and snow from the 10:00–11:00 hour, and wind interpolated between the 10:00 and 11:00 readings.
+
+Each checkpoint takes the forecast of the 0.1° cell (about 7 mi) it falls in. A plan asks for at most 450
+cells, to stay within the free service's limits (see [Services](#services-and-their-limits)). A long trip
+checked every 10 mi needs more, so its grid widens until the plan fits: Los Angeles to New York every 10 mi
+is read on a 0.4° grid. The panel says so whenever the grid is wider than 0.1°.
 
 ### The recommendation
 
@@ -125,8 +132,8 @@ Every service is free and needs no API key.
 
 | Service | Used for | Limits |
 |---|---|---|
-| [Valhalla](https://valhalla.github.io/valhalla/) public server | Truck routes | Fair use. One request may not span more than 1,500 km, so longer trips are routed in legs and joined. The server is sometimes busy, so a busy answer is retried once. |
-| [Open-Meteo](https://open-meteo.com) | Hourly forecasts | Free for non-commercial use: 600 calls a minute and 10,000 a day. Each location counts. A long trip checked every 10 mi uses a few hundred, so a few long plans in one minute can hit the limit, and the app then shows Open-Meteo's message. Forecasts are cached for an hour per 0.1° cell. |
+| [Valhalla](https://valhalla.github.io/valhalla/) public server, run by [FOSSGIS](https://www.fossgis.de/) | Truck routes | The [usage policy](https://routing.openstreetmap.de/about.html) allows at most one request per second, with attribution and a "fix the map" link (both in the panel footer). The whole service spaces its requests a second apart, and routes are cached. One request may not span more than 1,500 km, so longer trips are routed in legs and joined. The server is sometimes busy, so a busy answer is retried once. |
+| [Open-Meteo](https://open-meteo.com) | Hourly forecasts | Free for non-commercial use: 600 calls a minute and 10,000 a day. The terms don't say how a request for many locations counts, but each location seems to count as a call: one coast-to-coast plan of about 1,000 locations hit the per-minute limit on its own. So a plan asks for at most 450 (see above), and the whole service asks for at most 560 in any minute: a plan that would go over waits for the minute to free up (up to 45 seconds) or says to try again. Open-Meteo's own limit message can still appear, for example if the host shares its outgoing address with other apps that use Open-Meteo. Forecasts are cached for an hour per cell. |
 | [Photon](https://photon.komoot.io) | Place search | Fair use. Results are cached for a day. |
 | [OpenFreeMap](https://openfreemap.org) | Base map | None stated. If the base map style cannot load, the routes and weather still draw on a plain background. |
 
@@ -165,17 +172,22 @@ cd backend && pytest && ruff check .
 cd frontend && npm run lint && npx tsc -b
 ```
 
-The backend tests (99) cover:
+The backend tests (122) cover:
 
 - **Risk table:** every edge and every load rule.
 - **Ranking:** each step of the recommendation order, and its reason messages.
 - **Checkpoints:** spacing and ETAs.
 - **Polyline decoding and trip parsing:** against a recorded Valhalla response.
 - **Route candidates:** alternates, detours, near-duplicates, spurs, and long trips split into legs.
-- **Weather:** the forecast-hour rule and the unit checks.
+- **Weather:** the forecast-hour rule, the unit checks, the location budget and the per-minute quota.
+- **Pacing:** requests to the routing server are spaced a second apart, across threads.
 - **Corridor grid.**
-- **Place ranking.**
-- **The API:** with routing and weather replaced by fakes, so no test calls a live service.
+- **Place ranking**, and telling "no such place" from a failing place service.
+- **Reading the services' answers:** a server that sends its answer a byte at a time is given up at the
+  deadline (tested against a real local socket), and answers in an unexpected shape are reported as errors.
+- **The legend:** the map legend's thresholds are checked against the risk table the backend applies.
+- **The API:** with routing, weather and places replaced by fakes. Any request a test makes to a host other
+  than this machine fails the test.
 
 ## Deploying
 
@@ -189,6 +201,15 @@ The backend tests (99) cover:
 On Render's free plan the service sleeps after 15 minutes without traffic. The first request after that
 takes about a minute.
 
+## Security
+
+- There are no accounts and nothing is stored, so there are no sessions or cookies to protect.
+- Every input is validated on the server: the places, the departure window, the load and the interval.
+- The app's page may load scripts only from its own site and map data only from OpenFreeMap (a
+  Content-Security-Policy), and other sites can't frame it.
+- Answers from the outside services are read within a time and size limit, so a slow or broken service
+  can't hold the server.
+
 ## Project layout
 
 ```
@@ -201,6 +222,7 @@ backend/
     weather.py            Open-Meteo forecasts at a place and time
     recommend.py          route risk totals, ranking and the reason
     heatmap.py            corridor grid for the heatmap
+    http.py               reads the services' answers within a time and size limit
     service.py            puts a plan together
     views.py, serializers.py
     tests/
@@ -217,10 +239,15 @@ render.yaml, build.sh     deployment
 - **ETAs assume continuous driving.** They come from Valhalla's truck travel times, with no traffic, fuel
   stops or hours-of-service breaks. On a trip longer than a driver's shift, the truck would really reach
   later checkpoints later than shown.
-- **Forecasts are forecasts.** They are less certain further out, and are read on a 0.1° grid (about 7
-  miles).
+- **Forecasts are forecasts.** They are less certain further out. They are read on a 0.1° grid (about 7
+  miles), and on a wider one for long trips checked often (see above).
 - **Some trips have fewer than three routes.** Extra routes are made with waypoints. Where the roads allow
   only one or two sensible routes, the app shows what it found.
 - **The heatmap and the checkpoints answer different questions.** The heatmap shows the whole corridor at
-  one hour. The checkpoints show the weather at the hour the truck reaches each one.
-- **The free services have rate limits** (see above).
+  one hour, from grid points 0.2° or more apart (about 9-14 miles across the lower 48 states; the slider
+  shows the spacing), so a strong cell near the road can colour the map around a checkpoint that is itself
+  calmer. The checkpoints show the weather at the hour the truck reaches each one, where it is.
+- **The free services have rate limits** (see above), so the first plan for a trip is slow. In testing,
+  Chicago to Denver took 8-10 seconds, and Los Angeles to New York took about a minute when it ran right
+  after another plan and had to wait for the weather service's per-minute limit. A repeat plan for the same
+  trip reuses the cached routes and forecasts.
