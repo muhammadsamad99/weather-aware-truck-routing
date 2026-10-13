@@ -1,7 +1,7 @@
 """Checkpoints every N miles along a route, each with the truck's estimated arrival time."""
+from bisect import bisect_right
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from bisect import bisect_right
 
 from .geo import lerp
 from .providers.base import RouteOption

@@ -12,6 +12,7 @@ line. Longer trips, and every detour, are therefore routed as a chain of legs, e
 through points on the great circle between the ends, and the legs are joined into one route.
 """
 import logging
+from itertools import pairwise
 
 import requests
 
@@ -71,10 +72,10 @@ class ValhallaProvider:
         """One route through every location in order, requested one leg at a time (each leg under
         LEG_LIMIT_MI, split along the great circle where needed) and joined."""
         stops = [locations[0]]
-        for a, b in zip(locations, locations[1:]):
+        for a, b in pairwise(locations):
             parts = int(haversine_mi(a, b) // LEG_LIMIT_MI) + 1
             stops += [intermediate_point(a, b, k / parts) for k in range(1, parts)] + [b]
-        legs = [self._request([a, b], load_lb, alternates=0)[0] for a, b in zip(stops, stops[1:])]
+        legs = [self._request([a, b], load_lb, alternates=0)[0] for a, b in pairwise(stops)]
         return join(legs)
 
     def _request(self, locations, load_lb, alternates):
@@ -154,7 +155,7 @@ def detour_waypoint(route: RouteOption, fraction: float, side: int) -> tuple[flo
 def _cells(route: RouteOption, step_mi: float = 0.5) -> set[tuple[int, int]]:
     """Grid cells (about 0.7 mi) the route passes through, sampled every `step_mi`."""
     cells, next_mark = set(), 0.0
-    for (lat, lon), mile in zip(route.points, route.miles):
+    for (lat, lon), mile in zip(route.points, route.miles, strict=True):
         if mile >= next_mark:
             cells.add((round(lat * 100), round(lon * 100)))
             next_mark = mile + step_mi

@@ -46,8 +46,8 @@ def test_rounding_noise_never_decides():
 
 
 def test_reasons_name_the_deciding_criterion():
-    assert reason(risk(severe=0), risk(severe=25)) == "Fewer severe miles than the next route (0 mi vs 25 mi)."
-    assert reason(risk(high=5), risk(high=40)) == "Fewer high miles than the next route (5 mi vs 40 mi)."
+    assert reason(risk(severe=0), risk(severe=25)) == "Fewer Severe miles than the next route (0 mi vs 25 mi)."
+    assert reason(risk(high=5), risk(high=40)) == "Fewer High miles than the next route (5 mi vs 40 mi)."
     assert reason(risk(average=0.5), risk(average=0.9)) == "Lower average risk than the next route (0.50 vs 0.90)."
     assert reason(risk(seconds=36_000), risk(seconds=39_600)) == (
         "Same weather risk as the next route; shorter travel time (10 h 00 min vs 11 h 00 min).")

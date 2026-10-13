@@ -1,4 +1,5 @@
 import json
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -63,7 +64,7 @@ def test_parse_trip_matches_valhallas_own_totals():
     r = parse_trip(FIXTURE["trip"])
     assert r.total_seconds == pytest.approx(FIXTURE["trip"]["summary"]["time"], abs=0.5)
     assert r.total_miles == pytest.approx(FIXTURE["trip"]["summary"]["length"], rel=0.005)
-    assert all(b >= a for a, b in zip(r.seconds, r.seconds[1:]))
+    assert all(b >= a for a, b in pairwise(r.seconds))
     assert len(r.points) == len(r.miles) == len(r.seconds)
 
 
@@ -110,7 +111,7 @@ def test_detours_fill_in_when_valhalla_returns_one_route_and_near_copies_are_dro
         a = (body["locations"][0]["lat"], body["locations"][0]["lon"])
         b = (body["locations"][1]["lat"], body["locations"][1]["lon"])
         # each detour leg runs straight from its start to its end
-        pts = [offset_point(a, 0, 0)] + [(a[0] + (b[0] - a[0]) * k / 40, a[1] + (b[1] - a[1]) * k / 40) for k in range(1, 41)]
+        pts = [(a[0] + (b[0] - a[0]) * k / 40, a[1] + (b[1] - a[1]) * k / 40) for k in range(41)]
         return FakeResponse(200, {"trip": trip(pts, haversine_mi(a, b) / 50 * 3600)})
 
     routes = provider(respond).routes(start, north[-1], 20_000)

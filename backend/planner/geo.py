@@ -1,5 +1,6 @@
 """Small geometry helpers: distances in miles, polyline decoding, and points along a line."""
 import math
+from itertools import pairwise
 
 EARTH_RADIUS_MI = 3958.7613
 
@@ -37,7 +38,7 @@ def decode_polyline(encoded: str, precision: int = 6) -> list[tuple[float, float
 
 def cumulative_miles(points: list[tuple[float, float]]) -> list[float]:
     total, out = 0.0, [0.0]
-    for a, b in zip(points, points[1:]):
+    for a, b in pairwise(points):
         total += haversine_mi(a, b)
         out.append(total)
     return out
@@ -52,7 +53,8 @@ def offset_point(origin: tuple[float, float], bearing_deg: float, distance_mi: f
     lat1, lon1 = map(math.radians, origin)
     brg, d = math.radians(bearing_deg), distance_mi / EARTH_RADIUS_MI
     lat2 = math.asin(math.sin(lat1) * math.cos(d) + math.cos(lat1) * math.sin(d) * math.cos(brg))
-    lon2 = lon1 + math.atan2(math.sin(brg) * math.sin(d) * math.cos(lat1), math.cos(d) - math.sin(lat1) * math.sin(lat2))
+    lon2 = lon1 + math.atan2(math.sin(brg) * math.sin(d) * math.cos(lat1),
+                             math.cos(d) - math.sin(lat1) * math.sin(lat2))
     return math.degrees(lat2), (math.degrees(lon2) + 540) % 360 - 180
 
 

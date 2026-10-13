@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -6,7 +6,7 @@ from planner.checkpoints import checkpoints
 from planner.geo import cumulative_miles, decode_polyline, haversine_mi, offset_point
 from planner.providers.base import RouteOption
 
-DEPARTURE = datetime(2026, 10, 14, 6, 0, tzinfo=timezone.utc)
+DEPARTURE = datetime(2026, 10, 14, 6, 0, tzinfo=UTC)
 
 
 def straight_route(miles: float, mph: float = 60.0) -> RouteOption:
@@ -42,7 +42,9 @@ def test_eta_follows_the_routes_own_timing():
 
 def test_eta_uses_slow_stretches_rather_than_an_average_speed():
     route = straight_route(100, mph=60)
-    secs = [s if m <= 50 else s + (m - 50) / 30 * 3600 - (m - 50) / 60 * 3600 for m, s in zip(route.miles, route.seconds)]
+    # past mile 50 the truck slows from 60 to 30 mph
+    secs = [s if m <= 50 else s + (m - 50) / 30 * 3600 - (m - 50) / 60 * 3600
+            for m, s in zip(route.miles, route.seconds, strict=True)]
     slow = RouteOption(name="slow", points=route.points, miles=route.miles, seconds=tuple(secs), provider="test")
     cps = checkpoints(slow, 50, DEPARTURE)
     assert [round((c.eta - DEPARTURE).total_seconds() / 3600, 2) for c in cps] == [0, 0.83, 2.5]

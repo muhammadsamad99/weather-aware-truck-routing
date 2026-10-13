@@ -57,36 +57,28 @@ def route_risk(checkpoint_miles: list[float], checkpoint_levels: list[int], tota
                      total_miles=round(total, 2), total_seconds=total_seconds)
 
 
-CRITERIA = (
-    ("no_travel_miles", "No Travel miles", "mi"),
-    ("severe_miles", "Severe miles", "mi"),
-    ("high_miles", "High miles", "mi"),
-    ("average", "average risk", ""),
-    ("total_seconds", "travel time", "s"),
-)
-
-
 def rank(risks: list[RouteRisk]) -> list[int]:
     """Route indexes, best first."""
     return sorted(range(len(risks)), key=lambda i: risks[i].sort_key())
 
 
 def reason(best: RouteRisk, runner_up: RouteRisk | None) -> str:
-    """Why the best route beats the next one, in the brief's terms."""
+    """Why the best route beats the next one, naming the first criterion that separates them."""
     if runner_up is None:
         return "Only one route was found."
     if best.no_travel_miles == 0 and runner_up.no_travel_miles > 0:
         return f"The other routes cross No Travel weather ({runner_up.no_travel_miles:.0f} mi on the next best)."
-    labels = {"no_travel_miles": "fewer No Travel miles", "severe_miles": "fewer Severe miles",
-              "high_miles": "fewer High miles", "average": "lower average risk", "total_seconds": "shorter travel time"}
-    for attr, _label, unit in CRITERIA:
-        a, b = getattr(best, attr), getattr(runner_up, attr)
-        if attr == "total_seconds":
-            if round(a) != round(b):
-                return f"Same weather risk as the next route; {labels[attr]} ({_hours(a)} vs {_hours(b)})."
-        elif round(a, 3 if attr == "average" else MILE_PRECISION) != round(b, 3 if attr == "average" else MILE_PRECISION):
-            fmt = (lambda v: f"{v:.2f}") if attr == "average" else (lambda v: f"{v:.0f} {unit}")
-            return f"{labels[attr].capitalize()} than the next route ({fmt(a)} vs {fmt(b)})."
+    miles = round
+    for label, a, b in (("fewer No Travel miles", best.no_travel_miles, runner_up.no_travel_miles),
+                        ("fewer Severe miles", best.severe_miles, runner_up.severe_miles),
+                        ("fewer High miles", best.high_miles, runner_up.high_miles)):
+        if miles(a, MILE_PRECISION) != miles(b, MILE_PRECISION):
+            return f"{label[0].upper()}{label[1:]} than the next route ({a:.0f} mi vs {b:.0f} mi)."
+    if round(best.average, 3) != round(runner_up.average, 3):
+        return f"Lower average risk than the next route ({best.average:.2f} vs {runner_up.average:.2f})."
+    if round(best.total_seconds) != round(runner_up.total_seconds):
+        return (f"Same weather risk as the next route; shorter travel time "
+                f"({_hours(best.total_seconds)} vs {_hours(runner_up.total_seconds)}).")
     return "Tied with the next route on every criterion; listed first."
 
 
