@@ -1,5 +1,9 @@
 """Place search through Photon (https://photon.komoot.io), an OpenStreetMap geocoder built for search-as-you-type.
-A query of the form "lat, lon" is taken as coordinates without a lookup."""
+A query of the form "lat, lon" is taken as coordinates without a lookup.
+
+Photon can rank a landmark above the town it is named after ("St. Louis, MO" finds a university first), so for
+a query without digits, towns and cities come first; a query with digits is likely an address and keeps
+Photon's order."""
 import hashlib
 import re
 from dataclasses import dataclass
@@ -9,6 +13,7 @@ from django.core.cache import cache
 
 COORDS = re.compile(r"^\s*(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$")
 CACHE_SECONDS = 24 * 3600
+SEARCH_LIMIT = 5
 
 
 class GeocodeError(Exception):
@@ -42,7 +47,7 @@ class Geocoder:
         self.session = session or requests.Session()
         self.session.headers.update({"User-Agent": user_agent})
 
-    def search(self, query: str, limit: int = 5) -> list[Place]:
+    def search(self, query: str, limit: int = SEARCH_LIMIT) -> list[Place]:
         query = " ".join(query.split())[:200]
         if not query:
             return []
@@ -60,17 +65,28 @@ class Geocoder:
             features = resp.json().get("features", [])
         except (requests.RequestException, ValueError) as err:
             raise GeocodeError(f"Place search failed ({type(err).__name__}).") from err
+        features = [f for f in features if f.get("geometry", {}).get("type") == "Point"]
+        if not any(ch.isdigit() for ch in query):
+            features.sort(key=lambda f: _settlement_rank(f["properties"]))  # stable: Photon's order within a rank
         places = [Place(label=label(f["properties"]), lat=f["geometry"]["coordinates"][1],
-                        lon=f["geometry"]["coordinates"][0])
-                  for f in features if f.get("geometry", {}).get("type") == "Point"]
+                        lon=f["geometry"]["coordinates"][0]) for f in features]
         cache.set(key, places, CACHE_SECONDS)
         return places
 
     def first(self, query: str) -> Place:
-        places = self.search(query, limit=1)
+        """The top suggestion, the same one the place box would show first."""
+        places = self.search(query)
         if not places:
             raise GeocodeError(f"No place matches '{query}'.")
         return places[0]
+
+
+def _settlement_rank(props: dict) -> int:
+    if props.get("osm_key") == "place":
+        return 0  # city, town, village, hamlet, suburb...
+    if props.get("osm_key") == "boundary":
+        return 1  # county, municipality
+    return 2  # a building, shop, road...
 
 
 def label(props: dict) -> str:
