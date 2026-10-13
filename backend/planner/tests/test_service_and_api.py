@@ -123,7 +123,7 @@ def test_routes_are_cached_between_plans():
 
 def test_the_same_place_twice_is_refused():
     t = service.TripRequest(origin=ORIGIN, destination=ORIGIN, departure=DEPARTURE, load_lb=1000, interval_mi=10)
-    with pytest.raises(RoutingError, match="same place"):
+    with pytest.raises(service.InvalidTrip, match="same place"):
         service.plan_trip(t, provider=FakeProvider([]), forecasts=FakeForecasts(calm))
 
 
@@ -291,3 +291,28 @@ def test_the_tradeoff_names_the_gain_when_the_runner_up_is_not_the_fastest():
     plan = service.plan_trip(trip(), provider=FakeProvider(routes), forecasts=FakeForecasts(by_longitude))
     assert [r["name"] for r in sorted(plan["routes"], key=lambda r: r["rank"])] == ["Route B", "Route C", "Route A"]
     assert plan["tradeoff"].startswith("28 min longer than Route A, the fastest route, for fewer High miles (0 mi vs ")
+
+
+@override_settings(ALLOWED_HOSTS=["testserver"])
+def test_a_departure_without_a_time_zone_is_refused_not_read_as_utc():
+    naive = (datetime.now(UTC) + timedelta(hours=2)).replace(tzinfo=None, microsecond=0).isoformat()
+    r = post(valid_body(departure=naive))
+    assert r.status_code == 400 and "time zone" in r.json()["fields"]["departure"][0]
+
+
+@override_settings(ALLOWED_HOSTS=["testserver"])
+def test_the_same_place_twice_is_a_400(monkeypatch):
+    monkeypatch.setattr(service, "make_provider", lambda: FakeProvider([]))
+    monkeypatch.setattr(service, "make_forecasts", lambda: FakeForecasts(calm))
+    here = {"label": "Here", "lat": 40.0, "lon": -90.0}
+    r = post(valid_body(origin=here, destination=here))
+    assert r.status_code == 400 and r.json() == {"error": "Origin and destination are the same place."}
+
+
+@override_settings(ALLOWED_HOSTS=["testserver"])
+def test_framework_errors_use_the_api_error_shape():
+    c = Client()
+    bad_json = c.post("/api/plan", data="not json", content_type="application/json")
+    assert bad_json.status_code == 400 and set(bad_json.json()) == {"error"}
+    wrong_method = c.get("/api/plan")
+    assert wrong_method.status_code == 405 and set(wrong_method.json()) == {"error"}

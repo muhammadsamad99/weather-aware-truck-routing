@@ -28,6 +28,10 @@ ROUTE_CACHE_SECONDS = 6 * 3600
 GEOMETRY_STEP_MI = 0.4  # map geometry is thinned to a point every 0.4 mi; the logic uses the full route
 
 
+class InvalidTrip(Exception):
+    """The trip itself can't be planned (a user error, not a failing service)."""
+
+
 @dataclass(frozen=True)
 class TripRequest:
     origin: Place
@@ -72,7 +76,7 @@ def plan_trip(trip: TripRequest, provider: RoutingProvider | None = None, foreca
     forecasts = forecasts or make_forecasts()
     origin, destination = (trip.origin.lat, trip.origin.lon), (trip.destination.lat, trip.destination.lon)
     if haversine_mi(origin, destination) < 1:
-        raise RoutingError("Origin and destination are the same place.")
+        raise InvalidTrip("Origin and destination are the same place.")
     started = time.monotonic()
     routes = cached_routes(provider, origin, destination, trip.load_lb)
     routed = time.monotonic()

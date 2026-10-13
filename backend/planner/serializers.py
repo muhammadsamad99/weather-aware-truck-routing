@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
+from django.utils.dateparse import parse_datetime
 from rest_framework import serializers
 
 from .checkpoints import INTERVALS_MI
@@ -33,17 +34,26 @@ class PlaceField(serializers.Field):
         return value
 
 
+class AwareDateTimeField(serializers.DateTimeField):
+    """A date-time that must carry its time zone. DRF would read a naive one as UTC, which silently shifts
+    a departure written in local time."""
+
+    def to_internal_value(self, value):
+        parsed = parse_datetime(value) if isinstance(value, str) else None
+        if parsed is not None and parsed.tzinfo is None:
+            raise serializers.ValidationError("Give the departure with a time zone, for example 2026-10-15T08:00:00Z.")
+        return super().to_internal_value(value)
+
+
 class PlanRequestSerializer(serializers.Serializer):
     origin = PlaceField()
     destination = PlaceField()
-    departure = serializers.DateTimeField()
+    departure = AwareDateTimeField()
     load_lb = serializers.FloatField(min_value=1, max_value=MAX_LOAD_LB)
     interval_mi = serializers.ChoiceField(choices=INTERVALS_MI)
 
     def validate_departure(self, value: datetime) -> datetime:
         now = datetime.now(UTC)
-        if value.tzinfo is None:
-            raise serializers.ValidationError("Give the departure with a time zone.")
         if value < now - PAST_GRACE:
             raise serializers.ValidationError("The departure is in the past.")
         if value > now + timedelta(days=MAX_DAYS_AHEAD):
