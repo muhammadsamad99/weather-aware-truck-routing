@@ -3,6 +3,7 @@ import { ApiError, planTrip } from './api'
 import CheckpointTable from './components/CheckpointTable'
 import HeatmapControl from './components/HeatmapControl'
 import Legend from './components/Legend'
+import { MapBoundary } from './components/MapFallback'
 import MapView, { type Focus } from './components/MapView'
 import RouteCards from './components/RouteCards'
 import TripForm, { MAX_LOAD_LB } from './components/TripForm'
@@ -28,6 +29,8 @@ export default function App() {
   const [showHeatmap, setShowHeatmap] = useState(true)
   const [playing, setPlaying] = useState(false)
   const [focus, setFocus] = useState<Focus | null>(null)
+  const [mapWorks, setMapWorks] = useState(true)
+  const mapFailed = useCallback(() => setMapWorks(false), [])
   const [busy, setBusy] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [error, setError] = useState('')
@@ -135,7 +138,13 @@ export default function App() {
               )}
             </div>
             <RouteCards routes={plan.routes} selected={selected} onSelect={setSelected} />
-            {selectedRoute && <CheckpointTable route={selectedRoute} intervalMi={plan.interval_mi} onFocus={onFocus} />}
+            {selectedRoute && (
+              <CheckpointTable
+                route={selectedRoute}
+                intervalMi={plan.interval_mi}
+                onFocus={mapWorks ? onFocus : undefined}
+              />
+            )}
           </section>
         )}
 
@@ -151,15 +160,18 @@ export default function App() {
       </aside>
 
       <main className="map-area">
-        <MapView
-          plan={plan}
-          selected={selected}
-          hour={hour}
-          showHeatmap={showHeatmap}
-          focus={focus}
-          onSelectRoute={setSelected}
-        />
-        {plan && (
+        <MapBoundary onError={mapFailed}>
+          <MapView
+            plan={plan}
+            selected={selected}
+            hour={hour}
+            showHeatmap={showHeatmap}
+            focus={focus}
+            onSelectRoute={setSelected}
+            onUnavailable={mapFailed}
+          />
+        </MapBoundary>
+        {plan && mapWorks && (
           <HeatmapControl
             start={plan.heatmap.start}
             hours={plan.heatmap.hours}

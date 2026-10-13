@@ -5,7 +5,7 @@ import type { PlannedRoute } from '../types'
 interface Props {
   route: PlannedRoute
   intervalMi: number
-  onFocus: (index: number) => void
+  onFocus?: (index: number) => void // shows the checkpoint on the map; absent when there is no map
 }
 
 /** Every checkpoint on the selected route: where, when the truck is there, the forecast then, and the level. */
@@ -29,7 +29,23 @@ export default function CheckpointTable({ route, intervalMi, onFocus }: Props) {
           </thead>
           <tbody>
             {route.checkpoints.map((c) => (
-              <tr key={c.index} onClick={() => onFocus(c.index)} title={c.reasons.join('; ') || undefined}>
+              <tr
+                key={c.index}
+                className={onFocus ? 'clickable' : undefined}
+                tabIndex={onFocus ? 0 : undefined}
+                onClick={onFocus ? () => onFocus(c.index) : undefined}
+                onKeyDown={
+                  onFocus
+                    ? (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          onFocus(c.index)
+                        }
+                      }
+                    : undefined
+                }
+                title={c.reasons.join('; ') || undefined}
+              >
                 <td>{c.mile.toFixed(0)}</td>
                 <td>{formatDayTime(c.eta)}</td>
                 <td>{c.wind_mph.toFixed(0)}</td>

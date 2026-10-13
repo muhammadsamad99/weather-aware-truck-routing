@@ -10,6 +10,8 @@ import { bounds, haversineMi, positionAt } from '../geometry'
 import { levelColor, levelColorExpression } from '../levels'
 import { formatDateTime, formatMiles } from '../format'
 import type { Checkpoint, Plan, PlannedRoute } from '../types'
+import { mapProblem, type MapProblem } from '../mapProblem'
+import { MapUnavailable } from './MapFallback'
 
 const BASE_STYLE = 'https://tiles.openfreemap.org/styles/liberty'
 // Used only if the base map cannot load, so the routes and the weather still show.
@@ -36,15 +38,18 @@ interface Props {
   showHeatmap: boolean
   focus: Focus | null
   onSelectRoute: (name: string) => void
+  onUnavailable: () => void
 }
 
 const empty: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] }
 
-export default function MapView({ plan, selected, hour, showHeatmap, focus, onSelectRoute }: Props) {
+export default function MapView({ plan, selected, hour, showHeatmap, focus, onSelectRoute, onUnavailable }: Props) {
   const container = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const [ready, setReady] = useState(0) // bumps each time a style (and our layers) finishes loading
   const [baseMapFailed, setBaseMapFailed] = useState(false)
+  const [problem, setProblem] = useState<MapProblem | null>(null)
+  const unavailableRef = useRef(onUnavailable)
   const planRef = useRef(plan)
   const selectRef = useRef(onSelectRoute)
   const popup = useRef<maplibregl.Popup | null>(null)
@@ -54,17 +59,27 @@ export default function MapView({ plan, selected, hour, showHeatmap, focus, onSe
   useEffect(() => {
     planRef.current = plan
     selectRef.current = onSelectRoute
+    unavailableRef.current = onUnavailable
   })
 
   // The map is created once; its layers are added whenever a style loads.
   useEffect(() => {
-    const map = new maplibregl.Map({
-      container: container.current!,
-      style: BASE_STYLE,
-      center: [-96, 39],
-      zoom: 3.4,
-      attributionControl: { compact: true },
-    })
+    let map: maplibregl.Map
+    try {
+      map = new maplibregl.Map({
+        container: container.current!,
+        style: BASE_STYLE,
+        center: [-96, 39],
+        zoom: 3.4,
+        attributionControl: { compact: true },
+      })
+    } catch (err) {
+      // MapLibre throws here when the browser has no WebGL; the rest of the app works without the map
+      console.warn('The map could not start.', err)
+      setProblem(mapProblem(err))
+      unavailableRef.current()
+      return
+    }
     mapRef.current = map
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
     map.addControl(new maplibregl.ScaleControl({ unit: 'imperial' }), 'bottom-left')
@@ -175,6 +190,7 @@ export default function MapView({ plan, selected, hour, showHeatmap, focus, onSe
     showPopup(map, popup.current!, focus.route, cp)
   }, [focus])
 
+  if (problem) return <MapUnavailable problem={problem} />
   return (
     <div className="map-wrap">
       <div ref={container} className="map" role="region" aria-label="Map of the routes and the weather risk" />

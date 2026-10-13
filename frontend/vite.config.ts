@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
@@ -9,5 +10,8 @@ export default defineConfig({
   },
   build: {
     chunkSizeWarningLimit: 1200, // MapLibre alone is ~800 kB
+  },
+  test: {
+    environment: 'jsdom',
   },
 })

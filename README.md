@@ -172,7 +172,7 @@ DJANGO_SECRET_KEY=change-me gunicorn --chdir backend config.wsgi:application --b
 
 ```bash
 cd backend && pytest && ruff check .
-cd frontend && npm run lint && npx tsc -b
+cd frontend && npm run lint && npx tsc -b && npm test
 ```
 
 The backend tests (125) cover:
@@ -192,6 +192,10 @@ The backend tests (125) cover:
 - **The legend:** the map legend's thresholds are checked against the risk table the backend applies.
 - **The API:** with routing, weather and places replaced by fakes. Any request a test makes to a host other
   than this machine fails the test.
+
+The frontend tests (8, Vitest) cover the app without WebGL (the form and every result still work, and the
+map area says why the map is missing), a map that breaks for any other reason, and the truck's position at
+an hour.
 
 ## Deploying
 
@@ -251,6 +255,9 @@ render.yaml, build.sh     deployment
   one hour, from grid points 0.2° or more apart (about 9-14 miles across the lower 48 states; the slider
   shows the spacing), so a strong cell near the road can colour the map around a checkpoint that is itself
   calmer. The checkpoints show the weather at the hour the truck reaches each one, where it is.
+- **The map needs WebGL.** A browser without it (often on a computer or VM without a graphics card, or with
+  hardware acceleration off) gets a note in the map area instead of the map; the form, the recommendation,
+  the route cards and the checkpoint table still work.
 - **The free services have rate limits** (see above), so the first plan for a trip is slow. In testing,
   Chicago to Denver took 8-10 seconds, and Los Angeles to New York took about a minute when it ran right
   after another plan and had to wait for the weather service's per-minute limit. A repeat plan for the same

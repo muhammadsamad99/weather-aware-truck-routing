@@ -434,12 +434,21 @@ button.link {
 }
 
 .checkpoints tbody tr {
-  cursor: pointer;
   border-top: 1px solid var(--line);
 }
 
-.checkpoints tbody tr:hover {
+.checkpoints tbody tr.clickable {
+  cursor: pointer;
+}
+
+.checkpoints tbody tr.clickable:hover,
+.checkpoints tbody tr.clickable:focus-visible {
   background: var(--accent-soft);
+}
+
+.checkpoints tbody tr.clickable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 /* legend */
@@ -492,6 +501,29 @@ button.link {
 .map-wrap .map {
   width: 100%;
   height: 100%;
+}
+
+.map-unavailable {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 24px max(24px, 12%);
+  background: var(--soft);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.map-unavailable strong {
+  color: var(--ink);
+  font-size: 1rem;
+}
+
+.map-unavailable p {
+  margin: 0;
+  max-width: 60ch;
 }
 
 .map-notice {
