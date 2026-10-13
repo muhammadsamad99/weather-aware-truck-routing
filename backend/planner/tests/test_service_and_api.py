@@ -261,3 +261,9 @@ def test_a_heatmap_point_without_a_forecast_is_left_out_not_shown_as_low():
                              forecasts=FakeForecasts(patchy))
     frames = plan["heatmap"]["frames"]
     assert all(level is None for level in frames[45]) and all(level == LOW for level in frames[0])
+
+
+def test_an_unknown_routing_provider_is_a_clear_error(settings):
+    settings.ROUTING_PROVIDER = "acme"
+    with pytest.raises(RoutingError, match="Unknown routing provider 'acme'"):
+        service.make_provider()

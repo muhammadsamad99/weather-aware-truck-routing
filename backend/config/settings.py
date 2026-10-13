@@ -119,7 +119,6 @@ ROUTING_PROVIDER = os.environ.get("ROUTING_PROVIDER", "valhalla")
 VALHALLA_URL = os.environ.get("VALHALLA_URL", "https://valhalla1.openstreetmap.de")
 # The public server's usage policy (FOSSGIS): at most one request per second. Set 0 for your own server.
 VALHALLA_MIN_INTERVAL_SECONDS = float(os.environ.get("VALHALLA_MIN_INTERVAL_SECONDS", "1.0"))
-HERE_API_KEY = os.environ.get("HERE_API_KEY", "")
 OPEN_METEO_URL = os.environ.get("OPEN_METEO_URL", "https://api.open-meteo.com/v1/forecast")
 PHOTON_URL = os.environ.get("PHOTON_URL", "https://photon.komoot.io/api/")
 HTTP_USER_AGENT = "weather-aware-truck-routing/1.0 (+https://github.com/muhammadsamad99/weather-aware-truck-routing)"

@@ -51,10 +51,6 @@ def make_provider() -> RoutingProvider:
     if settings.ROUTING_PROVIDER == "valhalla":
         return ValhallaProvider(settings.VALHALLA_URL, settings.HTTP_USER_AGENT, settings.HTTP_TIMEOUT_SECONDS,
                                 session=_session, throttle=_valhalla_throttle)
-    if settings.ROUTING_PROVIDER == "here":
-        from .providers.here import HereProvider
-
-        return HereProvider(settings.HERE_API_KEY, settings.HTTP_USER_AGENT, settings.HTTP_TIMEOUT_SECONDS)
     raise RoutingError(f"Unknown routing provider '{settings.ROUTING_PROVIDER}'.")
 
 

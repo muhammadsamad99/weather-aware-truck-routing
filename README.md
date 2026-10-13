@@ -143,9 +143,11 @@ Every service is free and needs no API key.
 Each service's URL can be changed by an environment variable (see `.env.example`), for example to point at
 a self-hosted Valhalla.
 
-**HERE routing is planned** as a second provider. The routing code is behind a small interface
-(`planner/providers/base.py`), and `ROUTING_PROVIDER=here` selects it. It currently returns an error
-saying it is not implemented.
+**Adding a routing provider.** Routing sits behind a small interface (`planner/providers/base.py`): a provider
+has a `name` (used in the route cache key and the plan) and a `routes(origin, destination, load_lb, count=3)`
+method that returns up to `count` distinct `RouteOption`s, best first, each with its points and cumulative
+miles and seconds. Implement one next to `valhalla.py` and select it in `service.make_provider` with
+`ROUTING_PROVIDER`; checkpoints, weather, risk and ranking work on `RouteOption`s and don't change.
 
 ## Running it locally
 
@@ -224,7 +226,7 @@ takes about a minute.
 backend/
   config/                 Django settings and URLs (no database: nothing is stored)
   planner/
-    providers/            routing: base interface, Valhalla, HERE (planned)
+    providers/            routing: the provider interface and Valhalla
     risk.py               risk table and load rules
     checkpoints.py        checkpoints and ETAs
     weather.py            Open-Meteo forecasts at a place and time
