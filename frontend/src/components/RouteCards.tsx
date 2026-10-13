@@ -36,6 +36,7 @@ function RouteCards({ routes, selected, onSelect }: Props) {
               <CardActionArea
                 className="route-card"
                 aria-pressed={isSelected}
+                aria-label={cardLabel(r)}
                 onClick={() => onSelect(r.name)}
                 sx={{ p: 1.5, display: 'block' }}
               >
@@ -113,5 +114,16 @@ function RiskBar({ route }: { route: PlannedRoute }) {
         </Tooltip>
       ))}
     </Box>
+  )
+}
+
+/** The card as one sentence for screen readers; the card's own text runs together without its layout. */
+function cardLabel(r: PlannedRoute): string {
+  const risk = r.risk
+  return (
+    `${r.name}, rank ${r.rank}${r.recommended ? ', recommended' : ''}: ${formatMiles(r.miles)}, ` +
+    `${formatDuration(r.seconds)}, arrives ${formatDateTime(r.arrival)}. No Travel ${formatMiles(risk.no_travel_miles)}, ` +
+    `Severe ${formatMiles(risk.severe_miles)}, High ${formatMiles(risk.high_miles)}, ` +
+    `average risk ${risk.average.toFixed(2)}.`
   )
 }

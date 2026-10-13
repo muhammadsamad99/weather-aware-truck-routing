@@ -66,7 +66,8 @@ export default function HeatmapControl(props: Props) {
             points {spacing} mi apart
           </Typography>
         </Stack>
-        <Typography variant="body2" aria-live="polite" sx={{ fontVariantNumeric: 'tabular-nums', minWidth: '15ch', textAlign: 'right' }}>
+        {/* not a live region: during playback it changes every 0.7 s; the slider's value text carries it */}
+        <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums', minWidth: '15ch', textAlign: 'right' }}>
           +{hour} h · {formatDateTime(moment)}
         </Typography>
       </Stack>

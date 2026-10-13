@@ -20,7 +20,7 @@ const THRESHOLDS = [
 function Legend() {
   return (
     <Accordion slotProps={{ heading: { component: 'h2' } }}>
-      <AccordionSummary expandIcon={<ExpandIcon />}>
+      <AccordionSummary expandIcon={<ExpandIcon />} id="legend-summary" aria-controls="legend-details">
         <Typography component="span" variant="body2" sx={{ fontWeight: 600 }}>
           Risk levels
         </Typography>

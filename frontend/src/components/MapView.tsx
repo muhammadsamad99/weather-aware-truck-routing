@@ -88,7 +88,9 @@ export default function MapView({ plan, selected, hour, showHeatmap, focus, onSe
     mapRef.current = map
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right')
     map.addControl(new maplibregl.ScaleControl({ unit: 'imperial' }), 'bottom-left')
-    popup.current = new maplibregl.Popup({ closeButton: true, maxWidth: '280px', offset: 10 })
+    // focusAfterOpen off: Enter on a checkpoint row keeps focus in the table (the row holds the same details),
+    // so the arrow keys go on to the next row
+    popup.current = new maplibregl.Popup({ closeButton: true, maxWidth: '280px', offset: 10, focusAfterOpen: false })
 
     let styleLoaded = false
     map.on('style.load', () => {

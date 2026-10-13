@@ -28,8 +28,8 @@ React + TypeScript + Material UI + MapLibre GL on the front end, Django + Django
    buys.
 
    Click a card, or a route on the map, to select it. The table below the cards lists the selected route's
-   checkpoints with their arrival times, forecast and risk. Click a row (or press Enter on it) to find that
-   checkpoint on the map.
+   checkpoints with their arrival times, forecast and risk. Click a row to find that checkpoint on the map;
+   from the keyboard, the table is one Tab stop, the arrow keys move between rows and Enter finds the row.
 3. **On the map:**
    - Each route has a tag with its distance and driving time.
    - Every checkpoint is coloured by its risk; hover one for its arrival time, click it for the details.
@@ -227,10 +227,12 @@ The backend tests (144) cover:
 - **The API:** with routing, weather and places replaced by fakes. Any request a test makes to a host other
   than this machine fails the test.
 
-The frontend tests (13, Vitest and Testing Library) cover:
+The frontend tests (17, Vitest and Testing Library) cover:
 
 - **The place boxes:** a search only from three letters and once per pause in typing, a picked place kept
   until typed over, and picked places sent as coordinates.
+- **The results:** picking a card switches the route in the cards and the table; the table is one Tab stop
+  with the arrow keys between rows; a finished plan is announced once; every id reference resolves.
 - **A failed re-plan:** keeps the last results on screen and says so.
 - **The map's failure paths:** the app without WebGL (the form and every result still work, and the map area
   says why the map is missing), a map that breaks for another reason, and a lost graphics context.

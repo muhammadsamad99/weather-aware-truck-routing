@@ -81,7 +81,12 @@ const PLAN: Plan = {
 }
 
 const CHICAGO = { label: 'Chicago, Illinois, US', lat: 41.8756, lon: -87.6244 }
-const api = vi.hoisted(() => ({ suggestions: [] as unknown[], planReply: null as null | { status: number; body: unknown } }))
+const api = vi.hoisted(() => ({
+  suggestions: [] as unknown[],
+  planReply: null as null | { status: number; body: unknown },
+  holdNextPlan: false, // the next plan request waits until it is aborted, or released
+  release: () => {},
+}))
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -91,11 +96,19 @@ beforeEach(() => {
   mapStart.handlers = {}
   api.suggestions = []
   api.planReply = null
+  api.holdNextPlan = false
   vi.spyOn(console, 'warn').mockImplementation(() => {})
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (url: string) => {
+    vi.fn(async (url: string, init?: RequestInit) => {
       if (url.startsWith('/api/geocode')) return json({ results: api.suggestions })
+      if (api.holdNextPlan) {
+        api.holdNextPlan = false
+        return new Promise<Response>((resolve, reject) => {
+          api.release = () => resolve(json(PLAN))
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+        })
+      }
       return api.planReply ? json(api.planReply.body, api.planReply.status) : json(PLAN)
     }),
   )
@@ -253,5 +266,83 @@ describe("when the browser takes the map's graphics away", () => {
     expect(screen.getByText(notice)).toBeTruthy()
     act(() => mapStart.handlers.webglcontextrestored.forEach((fn) => fn()))
     expect(screen.queryByText(notice)).toBeNull()
+  })
+})
+
+const ROUTE_B = {
+  ...PLAN.routes[0],
+  name: 'Route B',
+  rank: 2,
+  recommended: false,
+  checkpoints: [
+    ...PLAN.routes[0].checkpoints,
+    { ...PLAN.routes[0].checkpoints[1], index: 2, mile: 80 },
+  ],
+}
+const TWO_ROUTES: Plan = { ...PLAN, routes: [PLAN.routes[0], ROUTE_B] }
+
+describe('the results', () => {
+  it('switch to the route whose card is picked, in the cards and the checkpoint table', async () => {
+    api.planReply = { status: 200, body: TWO_ROUTES }
+    const { container } = render(<App />, { wrapper: AppProviders })
+    fireEvent.change(screen.getByLabelText('Origin'), { target: { value: 'Here' } })
+    fireEvent.change(screen.getByLabelText('Destination'), { target: { value: 'There' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Plan routes' }))
+    const cardB = await screen.findByRole('button', { name: /^Route B, rank 2:/ })
+    const cardA = screen.getByRole('button', { name: /^Route A, rank 1, recommended:/ })
+    expect(cardA.getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByText('Route A: 2 checkpoints, every 25 mi')).toBeTruthy()
+    fireEvent.click(cardB)
+    expect(cardB.getAttribute('aria-pressed')).toBe('true')
+    expect(cardA.getAttribute('aria-pressed')).toBe('false')
+    expect(screen.getByText('Route B: 3 checkpoints, every 25 mi')).toBeTruthy()
+    expect(container.querySelectorAll('.checkpoints tbody tr')).toHaveLength(3)
+  })
+
+  it('announce the plan once in a status region, without the running seconds', async () => {
+    render(<App />, { wrapper: AppProviders })
+    api.holdNextPlan = true
+    fireEvent.change(screen.getByLabelText('Origin'), { target: { value: 'Here' } })
+    fireEvent.change(screen.getByLabelText('Destination'), { target: { value: 'There' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Plan routes' }))
+    expect(screen.getByRole('status').textContent).toBe('Routing and checking the forecast…')
+    await act(async () => api.release())
+    await screen.findByText('Only one route was found.')
+    expect(screen.getByRole('status').textContent).toBe('Planned: Route A is recommended.')
+  })
+
+  it('give the checkpoint table one Tab stop, with the arrow keys moving between rows', async () => {
+    api.planReply = { status: 200, body: TWO_ROUTES }
+    const { container } = render(<App />, { wrapper: AppProviders })
+    fireEvent.change(screen.getByLabelText('Origin'), { target: { value: 'Here' } })
+    fireEvent.change(screen.getByLabelText('Destination'), { target: { value: 'There' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Plan routes' }))
+    await screen.findByText('Route A: 2 checkpoints, every 25 mi')
+    const rows = () => [...container.querySelectorAll<HTMLElement>('.checkpoints tbody tr')]
+    await waitFor(() => expect(rows().map((r) => r.tabIndex)).toEqual([0, -1]))
+    act(() => rows()[0].focus())
+    fireEvent.keyDown(rows()[0], { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(rows()[1])
+    expect(rows().map((r) => r.tabIndex)).toEqual([-1, 0])
+    fireEvent.keyDown(rows()[1], { key: 'ArrowUp' })
+    expect(document.activeElement).toBe(rows()[0])
+  })
+
+  it('leave no id reference dangling and no id used twice', async () => {
+    api.planReply = { status: 200, body: TWO_ROUTES }
+    const { container } = render(<App />, { wrapper: AppProviders })
+    fireEvent.change(screen.getByLabelText('Origin'), { target: { value: 'Here' } })
+    fireEvent.change(screen.getByLabelText('Destination'), { target: { value: 'There' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Plan routes' }))
+    await screen.findByText('Route A: 2 checkpoints, every 25 mi')
+    const ids = [...container.querySelectorAll('[id]')].map((e) => e.id)
+    expect(ids.filter((id, i) => ids.indexOf(id) !== i)).toEqual([])
+    const refs = [...container.querySelectorAll('[aria-labelledby], [aria-describedby], [aria-controls], label[for]')]
+      .flatMap((e) =>
+        ['aria-labelledby', 'aria-describedby', 'aria-controls', 'for'].flatMap((a) => (e.getAttribute(a) ?? '').split(/\s+/)),
+      )
+      .filter(Boolean)
+    expect(refs.length).toBeGreaterThan(5)
+    expect(refs.filter((id) => !document.getElementById(id))).toEqual([])
   })
 })

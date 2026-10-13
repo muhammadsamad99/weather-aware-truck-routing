@@ -30,6 +30,16 @@ const CREDITS: [string, string][] = [
   ['Photon', 'https://photon.komoot.io/'],
   ['OpenFreeMap', 'https://openfreemap.org/'],
 ]
+// Read by screen readers, not shown.
+const SCREEN_READER_ONLY = {
+  position: 'absolute',
+  width: '1px',
+  height: '1px',
+  overflow: 'hidden',
+  clip: 'rect(0 0 0 0)',
+  whiteSpace: 'nowrap',
+} as const
+
 const credit = (name: string) => {
   const url = CREDITS.find(([n]) => n === name)![1]
   return (
@@ -124,7 +134,7 @@ export default function App() {
       })}
     >
       <Box
-        component="aside"
+        component="main"
         sx={{
           gridArea: 'panel',
           minWidth: 0,
@@ -158,21 +168,26 @@ export default function App() {
             </Link>
           )}
 
-          {busy && (
-            <Box role="status">
-              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                <CircularProgress size={16} aria-hidden="true" />
-                <Typography variant="body2" color="text.secondary">
-                  Routing and checking the forecast… {elapsed} s
-                </Typography>
-              </Stack>
-              {elapsed >= 15 && (
-                <Typography variant="caption" component="p" color="text.secondary" sx={{ mt: 0.5 }}>
-                  Long trips take longer: the free routing and weather services are asked at a limited pace.
+          {/* One status region, always there, so screen readers announce the start and the result once each;
+              the running seconds sit outside it so they aren't read out every second. */}
+          <Box sx={busy ? undefined : SCREEN_READER_ONLY}>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+              {busy && <CircularProgress size={16} aria-hidden="true" />}
+              <Typography role="status" variant="body2" color="text.secondary">
+                {busy ? 'Routing and checking the forecast…' : plan ? `Planned: ${plan.recommended} is recommended.` : ''}
+              </Typography>
+              {busy && (
+                <Typography variant="body2" color="text.secondary" aria-hidden="true">
+                  {elapsed} s
                 </Typography>
               )}
-            </Box>
-          )}
+            </Stack>
+            {busy && elapsed >= 15 && (
+              <Typography variant="caption" component="p" color="text.secondary" sx={{ mt: 0.5 }}>
+                Long trips take longer: the free routing and weather services are asked at a limited pace.
+              </Typography>
+            )}
+          </Box>
           {error && <Alert severity="error">{error}</Alert>}
 
           {plan && (
@@ -193,7 +208,12 @@ export default function App() {
         </Stack>
       </Box>
 
-      <Box component="main" sx={{ gridArea: 'map', position: 'relative', minHeight: 0 }} className="map-area">
+      <Box
+        component="section"
+        aria-label="Map"
+        sx={{ gridArea: 'map', position: 'relative', minHeight: 0 }}
+        className="map-area"
+      >
         <MapPane
           plan={plan}
           selected={selected}
