@@ -15,10 +15,10 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-it('keeps the trip form when the map breaks while drawing', () => {
+it('keeps the trip form when the map breaks while drawing', async () => {
   vi.spyOn(console, 'error').mockImplementation(() => {})
   vi.spyOn(console, 'warn').mockImplementation(() => {})
   render(<App />, { wrapper: AppProviders })
   expect(screen.getByLabelText('Origin')).toBeTruthy()
-  expect(screen.getByText('The map stopped working.')).toBeTruthy()
+  expect(await screen.findByText('The map stopped working.')).toBeTruthy()
 })

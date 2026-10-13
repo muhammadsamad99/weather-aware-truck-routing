@@ -1,8 +1,13 @@
-import { memo, useState } from 'react'
+import Box from '@mui/material/Box'
+import CircularProgress from '@mui/material/CircularProgress'
+import { lazy, memo, Suspense, useState } from 'react'
 import type { Plan } from '../types'
 import HeatmapControl from './HeatmapControl'
 import { MapBoundary } from './MapFallback'
-import MapView, { type Focus } from './MapView'
+import type { Focus } from './MapView'
+
+// MapLibre is most of the app's code; loading it separately lets the form appear first.
+const MapView = lazy(() => import('./MapView'))
 
 interface Props {
   plan: Plan | null
@@ -32,7 +37,8 @@ function MapPane({ plan, selected, focus, onSelectRoute, mapWorks, onMapFailed }
   return (
     <>
       <MapBoundary onError={onMapFailed}>
-        <MapView
+        <Suspense fallback={<MapLoading />}>
+          <MapView
           plan={plan}
           selected={selected}
           hour={hour}
@@ -40,7 +46,8 @@ function MapPane({ plan, selected, focus, onSelectRoute, mapWorks, onMapFailed }
           focus={focus}
           onSelectRoute={onSelectRoute}
           onUnavailable={onMapFailed}
-        />
+          />
+        </Suspense>
       </MapBoundary>
       {plan && mapWorks && (
         <HeatmapControl
@@ -60,6 +67,14 @@ function MapPane({ plan, selected, focus, onSelectRoute, mapWorks, onMapFailed }
 }
 
 export default memo(MapPane)
+
+function MapLoading() {
+  return (
+    <Box role="status" aria-label="Loading the map" sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', bgcolor: 'grey.50' }}>
+      <CircularProgress size={28} />
+    </Box>
+  )
+}
 
 /** The heatmap grid's spacing in miles: [east-west, north-south] (a degree of longitude shrinks with latitude). */
 function gridSpacingMi(plan: Plan): [number, number] {

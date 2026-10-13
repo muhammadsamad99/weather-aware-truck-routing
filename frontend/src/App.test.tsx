@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import AppProviders from './AppProviders'
@@ -7,7 +7,7 @@ import MapView from './components/MapView'
 import type { Plan } from './types'
 
 // MapLibre needs WebGL, which jsdom doesn't have; the fake map can be told to fail the way MapLibre does.
-const mapStart = vi.hoisted(() => ({ error: null as Error | null }))
+const mapStart = vi.hoisted(() => ({ error: null as Error | null, handlers: {} as Record<string, (() => void)[]> }))
 
 vi.mock('maplibre-gl', () => {
   class FakeMap {
@@ -15,7 +15,10 @@ vi.mock('maplibre-gl', () => {
       if (mapStart.error) throw mapStart.error
     }
     addControl() {}
-    on() {}
+    on(type: string, layerOrHandler: unknown, handler?: () => void) {
+      const fn = (typeof layerOrHandler === 'function' ? layerOrHandler : handler) as () => void
+      ;(mapStart.handlers[type] ??= []).push(fn)
+    }
     remove() {}
     fitBounds() {}
     getContainer() {
@@ -85,6 +88,7 @@ const json = (body: unknown, status = 200) =>
 
 beforeEach(() => {
   mapStart.error = null
+  mapStart.handlers = {}
   api.suggestions = []
   api.planReply = null
   vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -116,7 +120,7 @@ describe('without WebGL', () => {
   it('keeps the form and results, says why the map is missing, and drops the map-only controls', async () => {
     mapStart.error = new Error('Failed to initialize WebGL')
     const { container } = render(<App />, { wrapper: AppProviders })
-    expect(screen.getByText("The map can't be drawn in this browser.")).toBeTruthy()
+    expect(await screen.findByText("The map can't be drawn in this browser.")).toBeTruthy()
 
     await planATrip()
     expect(container.querySelectorAll('.route-card')).toHaveLength(1)
@@ -138,10 +142,10 @@ describe('with a working map', () => {
 })
 
 describe('when the map fails for another reason', () => {
-  it('says the map stopped working without blaming WebGL', () => {
+  it('says the map stopped working without blaming WebGL', async () => {
     mapStart.error = new Error("Invalid type: 'container' must be a String or HTMLElement.")
     render(<App />, { wrapper: AppProviders })
-    expect(screen.getByText('The map stopped working.')).toBeTruthy()
+    expect(await screen.findByText('The map stopped working.')).toBeTruthy()
     expect(screen.queryByText(/WebGL/)).toBeNull()
     expect(screen.getByLabelText('Origin')).toBeTruthy()
   })
@@ -234,5 +238,20 @@ describe('a re-plan that fails', () => {
       "No place matches 'Atlantis'. The map still shows the last plan.",
     )
     expect(container.querySelectorAll('.route-card')).toHaveLength(1)
+  })
+})
+
+describe("when the browser takes the map's graphics away", () => {
+  it('says so, and clears the notice when they come back', () => {
+    render(
+      <MapView plan={null} selected="" hour={0} showHeatmap focus={null} onSelectRoute={() => {}} onUnavailable={() => {}} />,
+      { wrapper: AppProviders },
+    )
+    const notice = /The browser paused the map's graphics/
+    expect(screen.queryByText(notice)).toBeNull()
+    act(() => mapStart.handlers.webglcontextlost.forEach((fn) => fn()))
+    expect(screen.getByText(notice)).toBeTruthy()
+    act(() => mapStart.handlers.webglcontextrestored.forEach((fn) => fn()))
+    expect(screen.queryByText(notice)).toBeNull()
   })
 })

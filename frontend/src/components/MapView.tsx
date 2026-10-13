@@ -52,6 +52,7 @@ export default function MapView({ plan, selected, hour, showHeatmap, focus, onSe
   const mapRef = useRef<maplibregl.Map | null>(null)
   const [ready, setReady] = useState(0) // bumps each time a style (and our layers) finishes loading
   const [baseMapFailed, setBaseMapFailed] = useState(false)
+  const [contextLost, setContextLost] = useState(false)
   const [problem, setProblem] = useState<MapProblem | null>(null)
   const unavailableRef = useRef(onUnavailable)
   const planRef = useRef(plan)
@@ -95,6 +96,9 @@ export default function MapView({ plan, selected, hour, showHeatmap, focus, onSe
       addLayers(map)
       setReady((n) => n + 1)
     })
+    // The browser can take the GPU context away (driver reset, too many tabs); MapLibre redraws when it's back.
+    map.on('webglcontextlost', () => setContextLost(true))
+    map.on('webglcontextrestored', () => setContextLost(false))
     map.on('error', (e) => {
       if (!styleLoaded) {
         console.warn('Base map unavailable, using a plain background.', e.error)
@@ -210,6 +214,15 @@ export default function MapView({ plan, selected, hour, showHeatmap, focus, onSe
   return (
     <div className="map-wrap">
       <div ref={container} className="map" role="region" aria-label="Map of the routes and the weather risk" />
+      {contextLost && (
+        <Alert
+          severity="warning"
+          className="map-notice"
+          sx={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', py: 0, zIndex: 2 }}
+        >
+          The browser paused the map's graphics; it redraws when they're back. Reloading the page also restores it.
+        </Alert>
+      )}
       {baseMapFailed && (
         <Alert
           severity="warning"
