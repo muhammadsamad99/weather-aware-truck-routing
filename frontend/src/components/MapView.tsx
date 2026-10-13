@@ -266,11 +266,12 @@ function heatFrames(plan: Plan): GeoJSON.FeatureCollection[] {
   const { points, frames } = plan.heatmap
   return frames.map((levels) => ({
     type: 'FeatureCollection',
-    features: points.map((coordinates, i) => ({
-      type: 'Feature',
-      properties: { level: levels[i] },
-      geometry: { type: 'Point', coordinates },
-    })),
+    // a point with no forecast for that hour is left off, not drawn as Low
+    features: points.flatMap((coordinates, i) =>
+      levels[i] === null
+        ? []
+        : [{ type: 'Feature' as const, properties: { level: levels[i] }, geometry: { type: 'Point' as const, coordinates } }],
+    ),
   }))
 }
 

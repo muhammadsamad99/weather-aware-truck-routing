@@ -68,6 +68,9 @@ The forecast is [Open-Meteo](https://open-meteo.com) hourly data:
 Rain and snow at a timestamp are the totals for the hour before it. So a truck at a checkpoint at 10:20
 gets rain and snow from the 10:00–11:00 hour, and wind interpolated between the 10:00 and 11:00 readings.
 
+A value the forecast leaves out is never read as calm weather: a checkpoint whose hour has no value can't
+be rated, so the plan stops with a message, and a heatmap point without a value is left off the map.
+
 Each checkpoint takes the forecast of the 0.1° cell (about 7 mi) it falls in. A plan asks for at most 450
 cells, to stay within the free service's limits (see [Services](#services-and-their-limits)). A long trip
 checked every 10 mi needs more, so its grid widens until the plan fits: Los Angeles to New York every 10 mi
@@ -172,14 +175,15 @@ cd backend && pytest && ruff check .
 cd frontend && npm run lint && npx tsc -b
 ```
 
-The backend tests (122) cover:
+The backend tests (125) cover:
 
 - **Risk table:** every edge and every load rule.
 - **Ranking:** each step of the recommendation order, and its reason messages.
 - **Checkpoints:** spacing and ETAs.
 - **Polyline decoding and trip parsing:** against a recorded Valhalla response.
 - **Route candidates:** alternates, detours, near-duplicates, spurs, and long trips split into legs.
-- **Weather:** the forecast-hour rule, the unit checks, the location budget and the per-minute quota.
+- **Weather:** the forecast-hour rule, the unit checks, missing values, the location budget and the
+  per-minute quota.
 - **Pacing:** requests to the routing server are spaced a second apart, across threads.
 - **Corridor grid.**
 - **Place ranking**, and telling "no such place" from a failing place service.

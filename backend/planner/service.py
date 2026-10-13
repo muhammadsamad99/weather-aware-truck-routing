@@ -19,7 +19,7 @@ from .providers.base import RouteOption, RoutingError, RoutingProvider
 from .providers.valhalla import Throttle, ValhallaProvider
 from .recommend import rank, reason, route_risk
 from .risk import LEVEL_NAMES, assess
-from .weather import GRID_DEG, PER_MINUTE, Forecasts, MinuteQuota, hour_floor
+from .weather import GRID_DEG, PER_MINUTE, Forecasts, MinuteQuota, WeatherError, hour_floor
 
 log = logging.getLogger(__name__)
 
@@ -182,13 +182,18 @@ def _thin(route: RouteOption) -> list[list[float]]:
 
 
 def _heatmap(corridor: Corridor, forecasts: Forecasts, trip: TripRequest) -> dict:
-    """The risk level at each corridor point for each hour from departure to departure + 48 h."""
+    """The risk level at each corridor point for each hour from departure to departure + 48 h (None where the
+    forecast has no value)."""
     frames = []
     for k in range(HEATMAP_HOURS + 1):
         moment = trip.departure + timedelta(hours=k)
         frame = []
         for lat, lon in corridor.points:
-            wx = forecasts.at(lat, lon, moment)
+            try:
+                wx = forecasts.at(lat, lon, moment)
+            except WeatherError:
+                frame.append(None)  # no forecast there and then: left off the map rather than shown as Low
+                continue
             frame.append(assess(wx.wind_mph, wx.rain_in_hr, wx.snow_in_hr, trip.load_lb).level)
         frames.append(frame)
     return {

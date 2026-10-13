@@ -249,3 +249,15 @@ def test_the_plan_reports_the_weather_grid():
     plan = service.plan_trip(trip(), provider=FakeProvider([route("Route A", 0, 100)]),
                              forecasts=FakeForecasts(calm))
     assert plan["weather_grid_deg"] == 0.1
+
+
+def test_a_heatmap_point_without_a_forecast_is_left_out_not_shown_as_low():
+    def patchy(lat, lon, moment):
+        if moment >= DEPARTURE + timedelta(hours=40):
+            raise WeatherError("The forecast has no value for that hour.")
+        return HourWeather(wind_mph=5, rain_in_hr=0, snow_in_hr=0)
+
+    plan = service.plan_trip(trip(), provider=FakeProvider([route("Route A", 0, 100)]),
+                             forecasts=FakeForecasts(patchy))
+    frames = plan["heatmap"]["frames"]
+    assert all(level is None for level in frames[45]) and all(level == LOW for level in frames[0])

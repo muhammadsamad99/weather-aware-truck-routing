@@ -184,3 +184,22 @@ def test_forecasts_take_from_the_quota_only_what_they_fetch():
     f2 = Forecasts("https://weather.example", "test-agent", session=FakeSession(), quota=Recording(560))
     f2.load(places, T0.date(), T0.date())  # all cached now
     assert taken == [30]
+
+
+def test_a_missing_value_is_not_read_as_calm_weather():
+    item = series_item(wind=lambda h: None if h == 5 else 10.0, rain=lambda h: None if h == 9 else 0.0)
+    s = parse_hourly(item)
+    assert s[T0 + timedelta(hours=5)].wind_mph is None
+    assert s[T0 + timedelta(hours=9)].rain_in_hr is None
+    f = forecasts(FakeSession(make_item=lambda lat, lon: item))
+    f.load([(40.0, -90.0)], T0.date(), T0.date() + timedelta(days=2))
+    with pytest.raises(WeatherError, match="no value"):
+        f.at(40.0, -90.0, T0 + timedelta(hours=5, minutes=30))  # wind at 05:00 is missing
+    with pytest.raises(WeatherError, match="no value"):
+        f.at(40.0, -90.0, T0 + timedelta(hours=8, minutes=10))  # rain for 08:00-09:00 is missing
+    assert f.at(40.0, -90.0, T0 + timedelta(hours=2)).wind_mph == 10.0
+
+
+def test_missing_showers_alone_count_as_none():
+    s = parse_hourly(series_item(rain=0.2, showers=lambda h: None))
+    assert s[T0].rain_in_hr == pytest.approx(0.2)

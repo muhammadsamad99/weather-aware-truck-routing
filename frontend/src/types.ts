@@ -48,7 +48,7 @@ export interface Heatmap {
   hours: number
   step_deg: number
   points: [number, number][] // [lon, lat]
-  frames: number[][] // frames[hour][point] = risk level
+  frames: (number | null)[][] // frames[hour][point] = risk level, or null where the forecast has no value
 }
 
 export interface Plan {

@@ -51,9 +51,9 @@ class ForecastRangeError(WeatherError):
 
 @dataclass(frozen=True)
 class HourWeather:
-    wind_mph: float
-    rain_in_hr: float
-    snow_in_hr: float
+    wind_mph: float | None  # None: the service sent no value for that hour, which is not the same as calm
+    rain_in_hr: float | None
+    snow_in_hr: float | None
 
 
 class MinuteQuota:
@@ -160,6 +160,9 @@ class Forecasts:
         if before is None or after is None:
             raise WeatherError(f"No forecast for {floor:%Y-%m-%d %H:00} UTC.")
         share = (moment.astimezone(UTC) - floor) / HOUR
+        if None in (before.wind_mph, after.wind_mph, after.rain_in_hr, after.snow_in_hr):
+            # a missing value must not read as calm weather, so the checkpoint can't be rated
+            raise WeatherError(f"The forecast has no value for {floor:%Y-%m-%d %H:00} UTC near {lat:.2f}, {lon:.2f}.")
         return HourWeather(wind_mph=before.wind_mph + (after.wind_mph - before.wind_mph) * share,
                            rain_in_hr=after.rain_in_hr, snow_in_hr=after.snow_in_hr)
 
@@ -213,11 +216,18 @@ def parse_hourly(item: dict) -> dict[datetime, HourWeather]:
         moment = datetime.fromisoformat(stamp).replace(tzinfo=UTC)
         out[moment] = HourWeather(
             wind_mph=_num(h["wind_speed_10m"][i]),
-            rain_in_hr=_num(h["rain"][i]) + _num(h["showers"][i]),
+            rain_in_hr=_sum(_num(h["rain"][i]), _num(h["showers"][i])),
             snow_in_hr=_num(h["snowfall"][i]),
         )
     return out
 
 
-def _num(value) -> float:
-    return float(value) if value is not None else 0.0
+def _num(value) -> float | None:
+    return float(value) if value is not None else None
+
+
+def _sum(rain: float | None, showers: float | None) -> float | None:
+    """Rain plus showers. Showers alone may be missing (some models don't split them out); rain may not."""
+    if rain is None:
+        return None
+    return rain + (showers or 0.0)
