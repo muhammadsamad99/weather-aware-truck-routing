@@ -1,10 +1,7 @@
-import maplibregl, {
-  type ExpressionSpecification,
-  type GeoJSONSource,
-  type MapLayerMouseEvent,
-  type StyleSpecification,
-} from 'maplibre-gl'
+import * as maplibregl from 'maplibre-gl'
+import type { ExpressionSpecification, GeoJSONSource, MapLayerMouseEvent, StyleSpecification } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { bounds, haversineMi, positionAt } from '../geometry'
 import { levelColor, levelColorExpression } from '../levels'
@@ -12,6 +9,10 @@ import { formatDateTime, formatMiles } from '../format'
 import type { Checkpoint, Plan, PlannedRoute } from '../types'
 import { mapProblem, type MapProblem } from '../mapProblem'
 import { MapUnavailable } from './MapFallback'
+
+// MapLibre loads its worker from a file next to its own script by default, which a bundled build doesn't
+// have; Vite bundles the worker here and MapLibre is told where it is.
+maplibregl.setWorkerUrl(workerUrl)
 
 const BASE_STYLE = 'https://tiles.openfreemap.org/styles/liberty'
 // Used only if the base map cannot load, so the routes and the weather still show.

@@ -31,7 +31,12 @@ vi.mock('maplibre-gl', () => {
     remove() {}
   }
   return {
-    default: { Map: FakeMap, NavigationControl: FakeLayerThing, ScaleControl: FakeLayerThing, Popup: FakeLayerThing, Marker: FakeLayerThing },
+    Map: FakeMap,
+    NavigationControl: FakeLayerThing,
+    ScaleControl: FakeLayerThing,
+    Popup: FakeLayerThing,
+    Marker: FakeLayerThing,
+    setWorkerUrl: () => {},
   }
 })
 

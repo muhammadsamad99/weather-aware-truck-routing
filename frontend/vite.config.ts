@@ -11,6 +11,9 @@ export default defineConfig({
   build: {
     chunkSizeWarningLimit: 1200, // MapLibre alone is ~800 kB
   },
+  worker: {
+    format: 'es', // MapLibre starts its worker as a module worker
+  },
   test: {
     environment: 'jsdom',
   },
