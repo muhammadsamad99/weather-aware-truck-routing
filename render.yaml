@@ -1,0 +1,23 @@
+# Render Blueprint: one web service. Django serves the API and the built React app.
+services:
+  - type: web
+    name: weather-aware-truck-routing
+    runtime: python
+    plan: free
+    buildCommand: ./build.sh
+    # One process, so the in-memory route and forecast caches are shared by every request;
+    # threads, because a plan spends its time waiting on the routing and weather services.
+    startCommand: gunicorn --chdir backend config.wsgi:application --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 60
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: NODE_VERSION
+        value: 24.21.0
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_DEBUG
+        value: "0"
+      - key: ROUTING_PROVIDER
+        value: valhalla

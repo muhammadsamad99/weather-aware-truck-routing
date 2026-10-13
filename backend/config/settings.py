@@ -69,6 +69,8 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 # The built React app (frontend/dist) is served from the site root by WhiteNoise.
 WHITENOISE_ROOT = FRONTEND_DIST if FRONTEND_DIST.exists() else None
 WHITENOISE_INDEX_FILE = True
+# Vite puts a content hash in every asset's name, so those can be cached for good.
+WHITENOISE_IMMUTABLE_FILE_TEST = r"^/assets/.+-[A-Za-z0-9_-]{8}\.(?:js|css)$"
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_CONTENT_TYPE_NOSNIFF = True
