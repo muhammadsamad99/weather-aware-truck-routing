@@ -1,11 +1,15 @@
 """The trip plan: routes, checkpoints, the weather at each checkpoint when the truck gets there, the risk,
 the recommended route and the corridor heatmap, as one JSON-ready dict."""
 import hashlib
+import logging
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+import requests
 from django.conf import settings
 from django.core.cache import cache
+from requests.adapters import HTTPAdapter
 
 from .checkpoints import checkpoints
 from .geo import haversine_mi
@@ -16,6 +20,8 @@ from .providers.valhalla import ValhallaProvider
 from .recommend import rank, reason, route_risk
 from .risk import LEVEL_NAMES, assess
 from .weather import Forecasts, hour_floor
+
+log = logging.getLogger(__name__)
 
 HEATMAP_HOURS = 48
 ROUTE_CACHE_SECONDS = 6 * 3600
@@ -31,9 +37,16 @@ class TripRequest:
     interval_mi: int
 
 
+# One HTTP session for the process, so connections to the routing, weather and place services are kept open
+# and reused from one request to the next instead of being set up (TLS and all) every time.
+_session = requests.Session()
+_session.mount("https://", HTTPAdapter(pool_connections=8, pool_maxsize=32))  # 8 threads x 4 forecast requests
+
+
 def make_provider() -> RoutingProvider:
     if settings.ROUTING_PROVIDER == "valhalla":
-        return ValhallaProvider(settings.VALHALLA_URL, settings.HTTP_USER_AGENT, settings.HTTP_TIMEOUT_SECONDS)
+        return ValhallaProvider(settings.VALHALLA_URL, settings.HTTP_USER_AGENT, settings.HTTP_TIMEOUT_SECONDS,
+                                session=_session)
     if settings.ROUTING_PROVIDER == "here":
         from .providers.here import HereProvider
 
@@ -42,11 +55,11 @@ def make_provider() -> RoutingProvider:
 
 
 def make_geocoder() -> Geocoder:
-    return Geocoder(settings.PHOTON_URL, settings.HTTP_USER_AGENT, settings.HTTP_TIMEOUT_SECONDS)
+    return Geocoder(settings.PHOTON_URL, settings.HTTP_USER_AGENT, settings.HTTP_TIMEOUT_SECONDS, session=_session)
 
 
 def make_forecasts() -> Forecasts:
-    return Forecasts(settings.OPEN_METEO_URL, settings.HTTP_USER_AGENT, settings.HTTP_TIMEOUT_SECONDS)
+    return Forecasts(settings.OPEN_METEO_URL, settings.HTTP_USER_AGENT, settings.HTTP_TIMEOUT_SECONDS, session=_session)
 
 
 def plan_trip(trip: TripRequest, provider: RoutingProvider | None = None, forecasts: Forecasts | None = None) -> dict:
@@ -55,14 +68,19 @@ def plan_trip(trip: TripRequest, provider: RoutingProvider | None = None, foreca
     origin, destination = (trip.origin.lat, trip.origin.lon), (trip.destination.lat, trip.destination.lon)
     if haversine_mi(origin, destination) < 1:
         raise RoutingError("Origin and destination are the same place.")
+    started = time.monotonic()
     routes = cached_routes(provider, origin, destination, trip.load_lb)
+    routed = time.monotonic()
 
     route_cps = [checkpoints(r, trip.interval_mi, trip.departure) for r in routes]
     corridor = corridor_points([r.points for r in routes])
     last_eta = max(cps[-1].eta for cps in route_cps)
     start = hour_floor(trip.departure)
     end = max(last_eta, start + timedelta(hours=HEATMAP_HOURS)) + timedelta(hours=1)
-    forecasts.load([(c.lat, c.lon) for cps in route_cps for c in cps] + corridor.points, start.date(), end.date())
+    places = [(c.lat, c.lon) for cps in route_cps for c in cps] + corridor.points
+    forecasts.load(places, start.date(), end.date())
+    log.info("plan %.0f mi apart: routes %.1fs, forecasts for %d places %.1fs", haversine_mi(origin, destination),
+             routed - started, len(places), time.monotonic() - routed)
 
     results, risks = [], []
     for route, cps in zip(routes, route_cps, strict=True):

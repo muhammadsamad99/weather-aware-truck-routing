@@ -1,4 +1,5 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -37,8 +38,8 @@ def plan(request):
     data = form.validated_data
     try:
         geocoder = service.make_geocoder()
-        origin = _place(geocoder, data["origin"])
-        destination = _place(geocoder, data["destination"])
+        with ThreadPoolExecutor(max_workers=2) as pool:  # two typed places are looked up at the same time
+            origin, destination = pool.map(lambda value: _place(geocoder, value), (data["origin"], data["destination"]))
         trip = service.TripRequest(origin=origin, destination=destination, departure=data["departure"],
                                    load_lb=data["load_lb"], interval_mi=int(data["interval_mi"]))
         return Response(service.plan_trip(trip))
