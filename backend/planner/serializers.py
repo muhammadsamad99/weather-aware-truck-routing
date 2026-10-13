@@ -39,7 +39,10 @@ class AwareDateTimeField(serializers.DateTimeField):
     a departure written in local time."""
 
     def to_internal_value(self, value):
-        parsed = parse_datetime(value) if isinstance(value, str) else None
+        try:
+            parsed = parse_datetime(value) if isinstance(value, str) else None
+        except ValueError:  # well formed but impossible (30 February, hour 25): DRF's own parsing refuses it
+            parsed = None
         if parsed is not None and parsed.tzinfo is None:
             raise serializers.ValidationError("Give the departure with a time zone, for example 2026-10-15T08:00:00Z.")
         return super().to_internal_value(value)

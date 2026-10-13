@@ -209,7 +209,7 @@ cd frontend && npm run lint && npx tsc -b && npm test
 
 CI runs all of these on every push and pull request (`.github/workflows/ci.yml`).
 
-The backend tests (141) cover:
+The backend tests (142) cover:
 
 - **Risk table:** every edge and every load rule.
 - **Ranking:** each step of the recommendation order, its reason messages and the trade-off line.

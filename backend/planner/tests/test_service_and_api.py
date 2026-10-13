@@ -301,6 +301,14 @@ def test_a_departure_without_a_time_zone_is_refused_not_read_as_utc():
 
 
 @override_settings(ALLOWED_HOSTS=["testserver"])
+def test_a_well_formed_but_impossible_departure_is_a_400_not_a_server_error():
+    for impossible in ("2026-02-30T08:00:00Z", "2026-10-15T25:00:00Z", "2026-10-15T08:00:00+25:00"):
+        r = post(valid_body(departure=impossible))
+        assert r.status_code == 400, impossible
+        assert "wrong format" in r.json()["fields"]["departure"][0]
+
+
+@override_settings(ALLOWED_HOSTS=["testserver"])
 def test_the_same_place_twice_is_a_400(monkeypatch):
     monkeypatch.setattr(service, "make_provider", lambda: FakeProvider([]))
     monkeypatch.setattr(service, "make_forecasts", lambda: FakeForecasts(calm))
