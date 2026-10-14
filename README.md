@@ -2,6 +2,9 @@
 
 [![CI](https://github.com/muhammadsamad99/weather-aware-truck-routing/actions/workflows/ci.yml/badge.svg)](https://github.com/muhammadsamad99/weather-aware-truck-routing/actions/workflows/ci.yml)
 
+**Live demo:** https://weather-aware-truck-routing-nl1o.onrender.com — a free Render instance, so it
+sleeps when idle; the first request after a pause takes about a minute.
+
 Helps a truck driver choose the safest route for a trip. Enter the origin, destination, departure time and
 load. The app finds three routes and checks the forecast at checkpoints every 10, 25 or 50 miles, for the
 hour the truck will be at each one. It rates each checkpoint on the risk table, adjusted for the load, and
