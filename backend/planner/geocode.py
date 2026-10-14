@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import requests
 from django.core.cache import cache
 
-from .http import SlowResponse, read_json
+from .http import DEADLINE_SECONDS, SlowResponse, read_json
 
 COORDS = re.compile(r"^\s*(-?\d{1,2}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$")
 CACHE_SECONDS = 24 * 3600
@@ -47,9 +47,11 @@ def parse_coords(query: str) -> Place | None:
 
 
 class Geocoder:
-    def __init__(self, base_url: str, user_agent: str, timeout: float = 10.0, session: requests.Session | None = None):
+    def __init__(self, base_url: str, user_agent: str, timeout: float = 10.0, session: requests.Session | None = None,
+                 deadline_s: float = DEADLINE_SECONDS):
         self.base_url = base_url
         self.timeout = timeout
+        self.deadline_s = deadline_s
         self.session = session or requests.Session()
         self.session.headers.update({"User-Agent": user_agent})
 
@@ -70,7 +72,7 @@ class Geocoder:
             if resp.status_code != 200:
                 resp.close()
                 raise GeocodeError(f"Place search failed (HTTP {resp.status_code}).")
-            features = read_json(resp).get("features", [])
+            features = read_json(resp, deadline_s=self.deadline_s).get("features", [])
         except (requests.RequestException, SlowResponse, ValueError, AttributeError) as err:
             raise GeocodeError(f"Place search failed ({type(err).__name__}).") from err
         features = [f for f in features if f.get("geometry", {}).get("type") == "Point"]

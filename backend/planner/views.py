@@ -25,7 +25,7 @@ def geocode(request):
     if len(query.strip()) < 3:
         return Response({"results": []})
     try:
-        places = service.make_geocoder().search(query, limit=5)
+        places = service.make_suggest_geocoder().search(query, limit=5)
     except GeocodeError as err:
         return Response({"error": str(err)}, status=502)
     return Response({"results": [p.as_dict() for p in places]})

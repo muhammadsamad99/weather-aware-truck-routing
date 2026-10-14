@@ -62,6 +62,17 @@ def make_geocoder() -> Geocoder:
     return Geocoder(settings.PHOTON_URL, settings.HTTP_USER_AGENT, settings.HTTP_TIMEOUT_SECONDS, session=_session)
 
 
+# Suggestions are a convenience, so they give up fast when Photon stalls (the place box then shows its
+# fallback note and typing still works); the plan-time lookup above keeps the patient budget.
+SUGGEST_TIMEOUT_SECONDS = 2.5
+SUGGEST_DEADLINE_SECONDS = 4.0
+
+
+def make_suggest_geocoder() -> Geocoder:
+    return Geocoder(settings.PHOTON_URL, settings.HTTP_USER_AGENT, SUGGEST_TIMEOUT_SECONDS,
+                    session=_session, deadline_s=SUGGEST_DEADLINE_SECONDS)
+
+
 # Shared by every request, so plans in the same minute stay within the weather service's limit together.
 _weather_quota = MinuteQuota(PER_MINUTE)
 

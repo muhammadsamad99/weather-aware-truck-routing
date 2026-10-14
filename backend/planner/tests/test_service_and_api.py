@@ -340,3 +340,18 @@ def test_a_checkpoint_is_rated_on_the_numbers_it_shows():
         assert (cp["wind_mph"], cp["rain_in_hr"], cp["snow_in_hr"]) == shown, reading
         assert cp["level"] == level, reading
         assert plan["heatmap"]["frames"][0][0] == level, reading  # the heatmap rates the same way
+
+
+@override_settings(ALLOWED_HOSTS=["testserver"])
+def test_the_suggestions_endpoint_uses_the_quick_geocoder(monkeypatch):
+    # /api/geocode must consult the short-budget factory, not the patient plan-time one.
+    used = []
+    monkeypatch.setattr(service, "make_suggest_geocoder",
+                        lambda: used.append("quick") or FakeGeocoderWithSearch())
+    r = Client().get("/api/geocode", {"q": "Denver"})
+    assert used == ["quick"] and r.json() == {"results": [{"label": "Denver", "lat": 41.4, "lon": -90.0}]}
+
+
+class FakeGeocoderWithSearch:
+    def search(self, query, limit=5):
+        return [Place(query, 41.4, -90.0)]

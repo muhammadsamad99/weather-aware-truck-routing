@@ -83,3 +83,27 @@ def test_a_failing_place_service_is_not_reported_as_no_match():
         with pytest.raises(GeocodeError) as caught:
             g.first("Boise")
         assert not isinstance(caught.value, PlaceNotFound)
+
+
+def test_suggestions_get_a_shorter_budget_than_plans():
+    # The autocomplete gives up fast when Photon stalls; the plan-time lookup stays patient.
+    from planner import service
+
+    quick, patient = service.make_suggest_geocoder(), service.make_geocoder()
+    assert (quick.timeout, quick.deadline_s) == (service.SUGGEST_TIMEOUT_SECONDS, service.SUGGEST_DEADLINE_SECONDS)
+    assert quick.timeout < patient.timeout
+    assert quick.deadline_s < patient.deadline_s
+
+
+def test_search_reads_the_body_under_its_own_deadline(monkeypatch):
+    seen = {}
+
+    def fake_read_json(resp, deadline_s=None, **kwargs):
+        seen["deadline_s"] = deadline_s
+        return {"features": []}
+
+    monkeypatch.setattr("planner.geocode.read_json", fake_read_json)
+    g = Geocoder("https://photon.example/api/", "test-agent", timeout=2.5,
+                 session=FakeSession(ST_LOUIS), deadline_s=4.0)
+    g.search("Denver")
+    assert seen["deadline_s"] == 4.0
