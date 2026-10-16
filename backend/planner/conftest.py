@@ -14,7 +14,7 @@ class LiveServiceCall(AssertionError):
 
 @pytest.fixture(autouse=True)
 def no_live_services(monkeypatch):
-    """Tests use fake routing, weather and place services; any request to another host fails the test."""
+    """No test may reach a live service: any request to a host other than this machine fails the test."""
 
     def guarded_send(adapter, request, *args, **kwargs):
         host = urlsplit(request.url).hostname

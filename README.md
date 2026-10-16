@@ -41,15 +41,15 @@ React + TypeScript + Material UI + MapLibre GL on the front end, Django + Django
 
 ## How the brief is covered
 
-| The brief asks for | Where it is | Checked by |
+| The brief asks for | Where it is | Tests |
 |---|---|---|
-| Origin, destination, departure date/time, load | `TripForm`, `PlaceInput` → `POST /api/plan`, validated in `planner/serializers.py` | `test_service_and_api.py`, `App.test.tsx` |
-| 3 route options from a routing API | `planner/providers/valhalla.py` | `test_valhalla.py` |
-| Weather every 10/25/50 mi at the truck's ETA | `planner/checkpoints.py`, `planner/weather.py` | `test_checkpoints.py`, `test_weather.py` |
+| Origin, destination, departure date/time, load | `TripForm`, `PlaceInput` → `POST /api/plan`, validated in `planner/serializers.py` | — |
+| 3 route options from a routing API | `planner/providers/valhalla.py` | — |
+| Weather every 10/25/50 mi at the truck's ETA | `planner/checkpoints.py`, `planner/weather.py` | `test_checkpoints.py` (spacing and ETAs) |
 | The risk table and load rules | `planner/risk.py` | `test_risk.py`, `test_legend.py` |
-| A recommendation that balances risk and time, in the brief's order | `planner/recommend.py` (the order, the reason, the trade-off line) | `test_recommend.py`, `test_service_and_api.py` |
-| Routes, checkpoints, risk levels, ETAs and route summaries on a map | `MapView.tsx` (route lines and tags, coloured checkpoints, hover and popups), `RouteCards.tsx` | `App.test.tsx` for the panel; the drawn map was checked in headless Chrome during development (not in CI) |
-| A heatmap along the corridor with a 0–48 h slider | `planner/heatmap.py`, `service._heatmap`, `HeatmapControl.tsx` | `test_heatmap.py`, `test_service_and_api.py` |
+| A recommendation that balances risk and time, in the brief's order | `planner/recommend.py` (the order, the reason, the trade-off line) | `test_recommend.py` |
+| Routes, checkpoints, risk levels, ETAs and route summaries on a map | `MapView.tsx` (route lines and tags, coloured checkpoints, hover and popups), `RouteCards.tsx` | — |
+| A heatmap along the corridor with a 0–48 h slider | `planner/heatmap.py`, `service._heatmap`, `HeatmapControl.tsx` | — |
 
 ## How a plan is made
 
@@ -210,47 +210,20 @@ DJANGO_SECRET_KEY=change-me gunicorn --chdir backend config.wsgi:application --b
 
 ```bash
 cd backend && pytest && ruff check .
-cd frontend && npm run lint && npx tsc -b && npm test
+cd frontend && npm run lint && npx tsc -b
 ```
 
 CI runs all of these on every push to `main` and on every pull request (`.github/workflows/ci.yml`).
 
-The backend tests (145) cover:
+The tests (69, pytest) are kept to the brief's own rules:
 
-- **Risk table:** every edge and every load rule, and that checkpoints and the heatmap are rated on the
-  numbers they show.
-- **Ranking:** each step of the recommendation order, its reason messages and the trade-off line.
-- **Checkpoints:** spacing and ETAs.
-- **Polyline decoding and trip parsing:** against a recorded Valhalla response.
-- **Route candidates:** alternates, detours, near-duplicates, spurs, and long trips split into legs.
-- **Weather:** the forecast-hour rule, the unit checks, missing values, the location budget, the
-  per-minute quota, and which failures are asked again.
-- **Pacing:** requests to the routing server are spaced a second apart, across threads.
-- **Corridor grid.**
-- **Place ranking**, and telling "no such place" from a failing place service.
-- **Reading the services' answers:** a server that sends its answer a byte at a time is given up at the
-  deadline (tested against a real local socket), and answers in an unexpected shape are reported as errors.
+- **Checkpoints:** one every 10/25/50 mi plus the destination, on the route itself, with ETAs taken from
+  the route's own timing (slow stretches included) rather than an average speed.
+- **Risk table:** every edge of the wind, rain and snow bands, every load rule, the worst condition setting
+  the level, and the reasons a level names.
+- **Ranking:** each step of the recommendation order, a No Travel stretch ranking behind a passable route,
+  differences too small to show never deciding, and the reason and trade-off lines.
 - **The legend:** the map legend's thresholds are checked against the risk table the backend applies.
-- **The API:** with routing, weather and places replaced by fakes. Any request a test makes to a host other
-  than this machine fails the test.
-
-The frontend tests (29, Vitest and Testing Library) cover:
-
-- **The place boxes:** a search from exactly three letters and only after a pause in typing, no lookups for
-  text the example fills in, a picked place kept until typed over, and picked places sent as coordinates.
-- **The form:** its own checks before any request, the server's message under the field it is about, a
-  double click that sends two plans (the first is cancelled and not reported as an error), and load steps.
-- **The results:** picking a card switches the route in the cards and the table; the table is one Tab stop
-  with the arrow keys between rows; a finished plan is announced once; every id reference resolves.
-- **A failed re-plan:** keeps the last results on screen and says so, including when the server's answer
-  can't be read.
-- **The heatmap control:** playing hour by hour and wrapping at +48 h, the on/off switch, and starting at
-  departure again for a new plan.
-- **The map's failure paths:** the app without WebGL (the form and every result still work, and the map area
-  says why the map is missing), a map that breaks for another reason, and a lost graphics context.
-- **Risk chips:** every label reads at 4.5:1 or better on its colour; a stretch under half a mile reads
-  "<1 mi", not 0.
-- **The truck's position** at an hour.
 
 ## Deploying
 
