@@ -55,7 +55,7 @@ React + TypeScript + Material UI + MapLibre GL on the front end, Django + Django
 
 | Step | What happens | Code |
 |---|---|---|
-| Places | Typed places are looked up with [Photon](https://photon.komoot.io) (OpenStreetMap). For a name without digits, towns and cities rank above landmarks: Photon puts a university first for "St. Louis, MO". | `planner/geocode.py` |
+| Places | Typed places are looked up with [Photon](https://photon.komoot.io) (OpenStreetMap). For a name without digits, towns and cities rank above landmarks: Photon puts a university first for "St. Louis, MO". If Photon fails while a trip is being planned, the place is looked up with [Nominatim](https://nominatim.org) (OpenStreetMap) instead. `lat, lon` needs no lookup. | `planner/geocode.py` |
 | Routes | See [Routes](#routes) below. | `planner/providers/valhalla.py` |
 | Checkpoints | At 0, N, 2N, … miles along each route, and at the destination. Each checkpoint's ETA is the departure plus Valhalla's driving time to that point. | `planner/checkpoints.py` |
 | Weather at the ETA | See [Weather at each checkpoint's ETA](#weather-at-each-checkpoints-eta) below. | `planner/weather.py` |
@@ -173,6 +173,7 @@ Every service is free and needs no API key.
 | [Valhalla](https://valhalla.github.io/valhalla/) public server, run by [FOSSGIS](https://www.fossgis.de/) | Truck routes | The [usage policy](https://routing.openstreetmap.de/about.html) allows at most one request per second, with attribution and a "fix the map" link (both in the panel footer). The whole service spaces its requests a second apart, and routes are cached. One request may not span more than 1,500 km, so longer trips are routed in legs and joined. The server is sometimes busy, so a busy or "overloaded" answer is tried twice more, 1.5 s and then 3 s later. |
 | [Open-Meteo](https://open-meteo.com) | Hourly forecasts | Free for non-commercial use: 600 calls a minute and 10,000 a day. The terms don't say how a request for many locations counts, but each location seems to count as a call: one coast-to-coast plan of about 1,000 locations hit the per-minute limit on its own. So a plan asks for at most 450 (see above), and the whole service asks for at most 560 in any minute: a plan that would go over waits until the minute frees up (at most a minute). Open-Meteo's own limit message can still appear, for example if the host shares its outgoing address with other apps that use Open-Meteo. A request now and then gets no answer for 20 s although the same request a moment later takes a second or two, so a request that gets no answer, or a 502-504, is asked once more a second later (and counts against the minute again). Forecasts are cached for an hour per cell. |
 | [Photon](https://photon.komoot.io) | Place search | Fair use. Results are cached for a day. Suggestion lookups give up after a few seconds and the box falls back to typed text; the plan-time lookup waits longer. |
+| [Nominatim](https://nominatim.org), run by the [OpenStreetMap Foundation](https://osmfoundation.org) | The plan's place lookups when Photon fails | The [usage policy](https://operations.osmfoundation.org/policies/nominatim/) allows at most one request per second, asks for caching and an identifying User-Agent, and forbids search-as-you-type. So it is never used for suggestions, the whole service spaces its requests a second apart, and results are cached for a day. |
 | [OpenFreeMap](https://openfreemap.org) | Base map | None stated. If the base map style cannot load, the routes and weather still draw on a plain background. |
 
 Each service's URL can be changed by an environment variable (see `.env.example`), for example to point at
@@ -299,3 +300,7 @@ render.yaml, build.sh     deployment
   Chicago to Denver took 8-10 seconds, and Los Angeles to New York took about a minute when it ran right
   after another plan and had to wait for the weather service's per-minute limit. A repeat plan for the same
   trip reuses the cached routes and forecasts.
+- **The live demo shares its outgoing address.** It runs on a free host, whose outgoing address other apps
+  use too. On some days Open-Meteo's daily limit for that address is used up, or Photon refuses it. The app
+  then says which service failed and what to do: a plan's place names fall back to Nominatim, and `lat, lon`
+  needs no lookup at all. Run locally, the app calls these services from your own address instead.

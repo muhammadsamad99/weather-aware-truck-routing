@@ -13,7 +13,7 @@ from requests.adapters import HTTPAdapter
 
 from .checkpoints import checkpoints
 from .geo import haversine_mi
-from .geocode import Geocoder, Place
+from .geocode import Geocoder, Nominatim, Place
 from .heatmap import Corridor, corridor_points
 from .providers.base import RouteOption, RoutingError, RoutingProvider
 from .providers.valhalla import Throttle, ValhallaProvider
@@ -58,8 +58,15 @@ def make_provider() -> RoutingProvider:
     raise RoutingError(f"Unknown routing provider '{settings.ROUTING_PROVIDER}'.")
 
 
+# Shared by every request: Nominatim's policy is at most one request a second from the whole service.
+_nominatim_throttle = Throttle(settings.NOMINATIM_MIN_INTERVAL_SECONDS)
+
+
 def make_geocoder() -> Geocoder:
-    return Geocoder(settings.PHOTON_URL, settings.HTTP_USER_AGENT, settings.HTTP_TIMEOUT_SECONDS, session=_session)
+    backup = Nominatim(settings.NOMINATIM_URL, settings.HTTP_USER_AGENT, _nominatim_throttle,
+                       settings.HTTP_TIMEOUT_SECONDS, session=_session)
+    return Geocoder(settings.PHOTON_URL, settings.HTTP_USER_AGENT, settings.HTTP_TIMEOUT_SECONDS, session=_session,
+                    backup=backup)
 
 
 # Suggestions are a convenience, so they give up fast when Photon stalls (the place box then shows its
