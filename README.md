@@ -23,8 +23,9 @@ React + TypeScript + Material UI + MapLibre GL on the front end, Django + Django
   High miles, average risk and time. When the pick isn't the fastest, the panel says what the extra time buys.
 - **A slider with no waiting.** All 49 hourly heatmap frames come with the plan, so moving the slider makes no
   network request.
-- **Failures in plain words.** When a free service fails, the message says what failed and what to do. `lat, lon`
-  needs no place search, and Nominatim takes over a plan's place lookups when Photon fails.
+- **A backup for every outside service.** When a free service fails, a second one takes over; where that changes
+  the result (car routes, the backup forecast), the panel says so (see [Backups](#backups)). When both fail, the
+  message says in plain words what failed and what to do.
 
 ![Chicago to Denver: three routes tagged with distance and driving time, the recommended route with what its extra time buys, checkpoints coloured by risk, and the corridor heatmap 24 hours after departure](docs/screenshot.jpg)
 
@@ -190,6 +191,9 @@ Every service is free and needs no API key.
 | [Photon](https://photon.komoot.io) | Place search | Fair use. Results are cached for a day. Suggestion lookups give up after a few seconds and the box falls back to typed text; the plan-time lookup waits longer. |
 | [Nominatim](https://nominatim.org), run by the [OpenStreetMap Foundation](https://osmfoundation.org) | The plan's place lookups when Photon fails | The [usage policy](https://operations.osmfoundation.org/policies/nominatim/) allows at most one request per second, asks for caching and an identifying User-Agent, and forbids search-as-you-type. So it is never used for suggestions, the whole service spaces its requests a second apart, and results are cached for a day. |
 | [OpenFreeMap](https://openfreemap.org) | Base map | None stated. If the base map style cannot load, the routes and weather still draw on a plain background. |
+| [MET Norway](https://api.met.no) Locationforecast | Hourly forecasts when Open-Meteo fails | The [terms](https://api.met.no/doc/TermsOfService): an identifying User-Agent, at most 20 requests a second from the whole app, coordinates with at most 4 decimals, no repeat before the answer's `Expires` time, and CC BY 4.0 attribution (in the panel footer). One location per request, so the whole service spaces its requests 0.1 s apart and the backup reads the forecast on at most 150 cells. Answers are cached for an hour, or until `Expires` if later. |
+| [OSRM](https://project-osrm.org) demo server | Routes when Valhalla fails | [At most one request per second](https://github.com/Project-OSRM/osrm-backend/wiki/Demo-server), reasonable non-commercial use, no guarantee of uptime. The whole service spaces its requests a second apart. |
+| [Open-Meteo geocoding](https://open-meteo.com/en/docs/geocoding-api) | Place suggestions when Photon fails | Free for non-commercial use, like the forecasts. Towns, cities and postcodes; no street addresses. Results are cached for a day. |
 
 Each service's URL can be changed by an environment variable (see `.env.example`), for example to point at
 a self-hosted Valhalla.
@@ -199,6 +203,24 @@ has a `name` (used in the route cache key and the plan) and a `routes(origin, de
 method that returns up to `count` distinct `RouteOption`s, best first, each with its points and cumulative
 miles and seconds. Implement one next to `valhalla.py` and select it in `service.make_provider` with
 `ROUTING_PROVIDER`; checkpoints, weather, risk and ranking work on `RouteOption`s and don't change.
+
+### Backups
+
+Every outside service has a second one behind it, used only when the first fails (an error, a timeout, a
+refusal or a limit, not "nothing found", which is an answer). Where a backup changes the result, the panel
+says so. When the backup fails too, the message is the first service's.
+
+| When this fails | This takes over | What changes for the user |
+|---|---|---|
+| Open-Meteo (forecasts) | MET Norway | The panel says the forecast is the backup's. MET Norway has no snowfall figure, so precipitation whose symbol says snow counts as snow, at Open-Meteo's own ratio (7 cm of snow for 10 mm of water); the data is converted from m/s and mm. Its hourly forecasts reach about two and a half days ahead: a trip that runs past them gets a message saying so, and heatmap hours past them are left off the map. |
+| Valhalla (truck routes) | OSRM | A warning in the panel: the routes follow car roads and car driving times, and the truck's weight isn't considered. OSRM often returns two routes rather than three. |
+| Photon (suggestions) | Open-Meteo geocoding | Suggestions list towns, cities and postcodes, without street addresses. |
+| Photon (a plan's typed places) | Nominatim | Nothing visible. |
+| OpenFreeMap (base map) | A plain background | The routes, checkpoints and heatmap still draw. |
+
+A backup lowers the chance that one service takes the app down; it can't rule it out. Two services can fail at
+the same time, and on a shared host (see [Known limitations](#known-limitations)) Open-Meteo's geocoding may be
+refused along with its forecasts.
 
 ## Running it locally
 
@@ -270,10 +292,12 @@ takes about a minute.
 backend/
   config/                 Django settings and URLs (no database: nothing is stored)
   planner/
-    providers/            routing: the provider interface and Valhalla
+    providers/            routing: the provider interface, Valhalla, and OSRM as its backup
     risk.py               risk table and load rules
     checkpoints.py        checkpoints and ETAs
     weather.py            Open-Meteo forecasts at a place and time
+    metno.py              MET Norway forecasts, the weather backup
+    geocode.py            place search: Photon, with Nominatim and Open-Meteo as backups
     recommend.py          route risk totals, ranking and the reason
     heatmap.py            corridor grid for the heatmap
     http.py               reads the services' answers within a time and size limit
@@ -316,6 +340,6 @@ render.yaml, build.sh     deployment
   after another plan and had to wait for the weather service's per-minute limit. A repeat plan for the same
   trip reuses the cached routes and forecasts.
 - **The live demo shares its outgoing address.** It runs on a free host, whose outgoing address other apps
-  use too. On some days Open-Meteo's daily limit for that address is used up, or Photon refuses it. The app
-  then says which service failed and what to do: a plan's place names fall back to Nominatim, and `lat, lon`
-  needs no lookup at all. Run locally, the app calls these services from your own address instead.
+  use too. On some days Open-Meteo's daily limit for that address is used up, or Photon refuses it. The
+  backups then take over (see [Backups](#backups)), and `lat, lon` needs no lookup at all. Run locally, the app
+  calls these services from your own address instead.
