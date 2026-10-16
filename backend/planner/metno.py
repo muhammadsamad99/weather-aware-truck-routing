@@ -15,6 +15,8 @@ backup reads the forecast on a coarser grid (at most MAX_PLACES cells) and space
 whole process shares.
 """
 import logging
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime
 from email.utils import parsedate_to_datetime
@@ -29,6 +31,7 @@ log = logging.getLogger(__name__)
 
 MAX_PLACES = 150  # one request per cell: at 10 a second, a plan's forecasts take about 15 s at most
 PARALLEL_REQUESTS = 4
+DEADLINE_SECONDS = 60.0  # the whole backup load; past it, the plan reports the weather services as unavailable
 MPS_TO_MPH = 2.236936
 MM_TO_INCH = 1 / 25.4
 SNOW_CM_PER_MM = 0.7  # Open-Meteo's own ratio: "7 cm snow = 10 mm precipitation water equivalent"
@@ -40,10 +43,12 @@ class MetNorwayForecasts(Forecasts):
     source = "met-norway"
 
     def __init__(self, base_url: str, user_agent: str, throttle, timeout: float = 20.0,
-                 session: requests.Session | None = None, max_places: int = MAX_PLACES):
+                 session: requests.Session | None = None, max_places: int = MAX_PLACES,
+                 deadline_s: float = DEADLINE_SECONDS):
         super().__init__(base_url, user_agent, timeout, session=session)
         self.throttle = throttle
         self.max_places = max_places
+        self.deadline_s = deadline_s
         self.hourly_until: datetime | None = None  # the last hour every loaded cell has hourly values for
 
     def load(self, locations: list[tuple[float, float]], start: date, end: date) -> None:
@@ -56,12 +61,26 @@ class MetNorwayForecasts(Forecasts):
                 self._series[key] = cached
             else:
                 missing.append(key)
-        if len(missing) == 1:
-            self._fetch_one(missing[0], start, end)
-        elif missing:
-            with ThreadPoolExecutor(max_workers=PARALLEL_REQUESTS) as pool:
-                for future in [pool.submit(self._fetch_one, key, start, end) for key in missing]:
-                    future.result()  # re-raises the first failure
+        # One request per cell, so a service that stops answering must not be asked once per cell: after the
+        # first failure, or past the deadline, the requests still queued are skipped.
+        failed = threading.Event()
+        deadline = time.monotonic() + self.deadline_s
+
+        def fetch(key):
+            if failed.is_set():
+                return
+            if time.monotonic() > deadline:
+                failed.set()
+                raise WeatherError(f"The backup weather service took longer than {self.deadline_s:.0f} s.")
+            try:
+                self._fetch_one(key, start, end)
+            except BaseException:
+                failed.set()
+                raise
+
+        with ThreadPoolExecutor(max_workers=PARALLEL_REQUESTS) as pool:
+            for future in [pool.submit(fetch, key) for key in missing]:
+                future.result()  # re-raises the first failure
         lasts = [max((t for t, w in self._series[key].items() if w.rain_in_hr is not None), default=None)
                  for key in keys]
         self.hourly_until = None if None in lasts or not lasts else min(lasts)
