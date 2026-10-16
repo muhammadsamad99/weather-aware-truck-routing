@@ -5,6 +5,8 @@
 **Live demo:** https://weather-aware-truck-routing-nl1o.onrender.com — a free Render instance, so it
 sleeps when idle; the first request after a pause takes about a minute.
 
+**Walkthrough (Loom, in two parts):** [Part 1 – the app (4 min)](https://www.loom.com/share/1c2f67b11cee44459aa119ccbbfecbff) · [Part 2 – the code (5 min)](https://www.loom.com/share/ea173c8d96b24a888addc3d518309d07)
+
 Helps a truck driver choose the safest route for a trip. Enter the origin, destination, departure time and
 load. The app finds three routes and checks the forecast at checkpoints every 10, 25 or 50 miles, for the
 hour the truck will be at each one. It rates each checkpoint on the risk table, adjusted for the load, and
