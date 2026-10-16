@@ -19,7 +19,11 @@ SEARCH_LIMIT = 5
 
 
 class GeocodeError(Exception):
-    """The place service failed."""
+    """The place service failed. `kind` is "unavailable", the only kind the API words differently for now."""
+
+    def __init__(self, message: str, kind: str = "unavailable"):
+        super().__init__(message)
+        self.kind = kind
 
 
 class PlaceNotFound(GeocodeError):

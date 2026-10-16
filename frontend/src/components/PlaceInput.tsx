@@ -6,6 +6,9 @@ import type { Place, PlaceInputValue } from '../types'
 
 const DEBOUNCE_MS = 400
 const MIN_CHARS = 3
+const LOOKUP_FAILED =
+  "Suggestions aren't available right now. You can still type a place and plan, or enter coordinates, " +
+  'for example 28.54, -81.38.'
 
 interface Props {
   label: string
@@ -59,7 +62,7 @@ export default function PlaceInput({ label, value, onChange, error, placeholder 
   const hint = value.place
     ? `${value.place.lat.toFixed(4)}, ${value.place.lon.toFixed(4)}`
     : lookupFailed
-      ? 'Suggestions are unavailable; the place will be looked up when you plan.'
+      ? LOOKUP_FAILED
       : undefined
 
   return (

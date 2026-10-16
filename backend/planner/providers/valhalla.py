@@ -88,7 +88,7 @@ class ValhallaProvider:
         else:
             found = [self._chained([origin, destination], load_lb)]
         if not found:
-            raise RoutingError("No truck route was found between these places.")
+            raise RoutingError("No truck route was found between these places.", kind="no_route")
         primary = found[0]
         kept = [primary]
         for option in found[1:]:
@@ -151,7 +151,8 @@ class ValhallaProvider:
             trips = [data["trip"]] + [alt["trip"] for alt in data.get("alternates", []) if "trip" in alt]
             return [parse_trip(trip) for trip in trips]
         except (KeyError, TypeError, IndexError, ValueError) as err:
-            raise RoutingError(f"The routing service sent a route in an unexpected shape ({err!r}).") from err
+            raise RoutingError(f"The routing service sent a route in an unexpected shape ({err!r}).",
+                               kind="bad_answer") from err
 
     def _post(self, body: dict) -> dict:
         delays = list(RETRY_DELAYS_SECONDS)
@@ -175,9 +176,14 @@ class ValhallaProvider:
                 log.info("routing service busy (HTTP %s: %s), trying again", resp.status_code, error)
                 self.sleep(delays.pop(0))
                 continue
+            if busy:
+                raise RoutingError(f"The routing service stayed busy (HTTP {resp.status_code}: {error}).", kind="busy")
             if data is None:
-                raise RoutingError(f"The routing service answered HTTP {resp.status_code} without JSON.")
-            raise RoutingError(error or f"The routing service answered HTTP {resp.status_code}.")
+                raise RoutingError(f"The routing service answered HTTP {resp.status_code} without JSON.",
+                                   kind="bad_answer")
+            # Valhalla answers 400 when it can't route the request: a place off the road network, or no connection
+            raise RoutingError(error or f"The routing service answered HTTP {resp.status_code}.",
+                               kind="no_route" if resp.status_code == 400 else "unavailable")
 
 
 def parse_trip(trip: dict) -> RouteOption:

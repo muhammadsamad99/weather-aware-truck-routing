@@ -44,7 +44,12 @@ RETRY_DELAY_SECONDS = 1.0
 
 
 class WeatherError(Exception):
-    """The forecast service failed or has no forecast for the time asked."""
+    """The forecast service failed or has no forecast for the time asked. `kind` says which, so the API can
+    tell a person in plain words: "busy", "daily_limit", "unavailable", "bad_answer" or "missing"."""
+
+    def __init__(self, message: str, kind: str = "unavailable"):
+        super().__init__(message)
+        self.kind = kind
 
 
 class ForecastRangeError(WeatherError):
@@ -88,7 +93,7 @@ class MinuteQuota:
             wait = max(wait, 0.05)  # always move on, so the wait cap is reached even if nothing expires
             if waited + wait > max_wait:
                 raise WeatherError("The weather service's per-minute limit is in use by other plans; "
-                                   "try again in a minute.")
+                                   "try again in a minute.", kind="busy")
             self.sleep(wait)
             waited += wait
 
@@ -157,15 +162,16 @@ class Forecasts:
     def at(self, lat: float, lon: float, moment: datetime) -> HourWeather:
         series = self._series.get(grid_key(lat, lon, self.grid_deg))
         if series is None:
-            raise WeatherError("No forecast was loaded for this location.")
+            raise WeatherError("No forecast was loaded for this location.", kind="missing")
         floor = hour_floor(moment)
         before, after = series.get(floor), series.get(floor + HOUR)
         if before is None or after is None:
-            raise WeatherError(f"No forecast for {floor:%Y-%m-%d %H:00} UTC.")
+            raise WeatherError(f"No forecast for {floor:%Y-%m-%d %H:00} UTC.", kind="missing")
         share = (moment.astimezone(UTC) - floor) / HOUR
         if None in (before.wind_mph, after.wind_mph, after.rain_in_hr, after.snow_in_hr):
             # a missing value must not read as calm weather, so the checkpoint can't be rated
-            raise WeatherError(f"The forecast has no value for {floor:%Y-%m-%d %H:00} UTC near {lat:.2f}, {lon:.2f}.")
+            raise WeatherError(f"The forecast has no value for {floor:%Y-%m-%d %H:00} UTC near {lat:.2f}, {lon:.2f}.",
+                               kind="missing")
         return HourWeather(wind_mph=before.wind_mph + (after.wind_mph - before.wind_mph) * share,
                            rain_in_hr=after.rain_in_hr, snow_in_hr=after.snow_in_hr)
 
@@ -189,18 +195,22 @@ class Forecasts:
         except (SlowResponse, requests.RequestException) as err:
             raise WeatherError(f"The weather service did not answer in time ({err}).") from err
         except ValueError as err:
-            raise WeatherError(f"The weather service answered HTTP {resp.status_code} without JSON.") from err
+            raise WeatherError(f"The weather service answered HTTP {resp.status_code} without JSON.",
+                               kind="bad_answer") from err
         if resp.status_code != 200:
             reason = data.get("reason") if isinstance(data, dict) else None
-            raise WeatherError(reason or f"The weather service answered HTTP {resp.status_code}.")
+            raise WeatherError(reason or f"The weather service answered HTTP {resp.status_code}.",
+                               kind=_failure_kind(resp.status_code, reason))
         items = data if isinstance(data, list) else [data]
         if len(items) != len(keys):
-            raise WeatherError("The weather service returned a different number of locations than asked.")
+            raise WeatherError("The weather service returned a different number of locations than asked.",
+                               kind="bad_answer")
         for key, item in zip(keys, items, strict=True):
             try:
                 series = parse_hourly(item)
             except (KeyError, TypeError, IndexError, AttributeError, ValueError) as err:
-                raise WeatherError(f"The weather service sent a forecast in an unexpected shape ({err!r}).") from err
+                raise WeatherError(f"The weather service sent a forecast in an unexpected shape ({err!r}).",
+                                   kind="bad_answer") from err
             self._series[key] = series
             cache.set(self._cache_key(key, start, end), series, CACHE_SECONDS)
 
@@ -228,11 +238,19 @@ class Forecasts:
         raise AssertionError("unreachable")
 
 
+def _failure_kind(status: int, reason: str | None) -> str:
+    """Open-Meteo answers 429 for both of its limits, and its reason says which ("Daily API request limit
+    exceeded" or the per-minute one)."""
+    if status == 429:
+        return "daily_limit" if "daily" in (reason or "").lower() else "busy"
+    return "unavailable"
+
+
 def parse_hourly(item: dict) -> dict[datetime, HourWeather]:
     units = item.get("hourly_units", {})
     expected = units.get("wind_speed_10m") in ("mp/h", "mph") and units.get("rain") == units.get("snowfall") == "inch"
     if not expected:
-        raise WeatherError(f"Unexpected forecast units: {units}")
+        raise WeatherError(f"Unexpected forecast units: {units}", kind="bad_answer")
     h = item["hourly"]
     out = {}
     for i, stamp in enumerate(h["time"]):

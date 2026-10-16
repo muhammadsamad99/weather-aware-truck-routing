@@ -9,7 +9,7 @@ export class ApiError extends Error {
   }
 }
 
-const UNREADABLE = 'The server sent an answer that could not be read. Try again.'
+const UNREADABLE = "The server sent an answer the app couldn't read. Please try again."
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   let response: Response
@@ -26,7 +26,10 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     if ((err as Error).name === 'AbortError') throw err // a newer request replaced this one
   }
   if (!response.ok) {
-    throw new ApiError(body?.error ?? `The server answered ${response.status}.`, body?.fields ?? {})
+    throw new ApiError(
+      body?.error ?? `Something went wrong on the server (error ${response.status}). Please try again in a minute.`,
+      body?.fields ?? {},
+    )
   }
   if (body === null || typeof body !== 'object') throw new ApiError(UNREADABLE)
   return body as T

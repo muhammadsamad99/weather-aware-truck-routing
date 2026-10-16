@@ -4,7 +4,12 @@ from typing import Protocol
 
 
 class RoutingError(Exception):
-    """The provider could not route the trip (bad input, no road connection, or the service failed)."""
+    """The provider could not route the trip. `kind` says why, so the API can tell a person in plain words:
+    "no_route" (no road connection, or a place off the road network), "busy", "unavailable" or "bad_answer"."""
+
+    def __init__(self, message: str, kind: str = "unavailable"):
+        super().__init__(message)
+        self.kind = kind
 
 
 @dataclass(frozen=True)
