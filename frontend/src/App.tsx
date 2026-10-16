@@ -235,7 +235,8 @@ export default function App() {
         <Typography variant="caption" component="p" color="text.secondary">
           Routes: {credit('Valhalla')} on the {credit('FOSSGIS')} server (backup: {credit('OSRM')}) · Map data © {credit('OpenStreetMap contributors')}{' '}
           ({credit('fix the map')}) · Weather data by {credit('Open-Meteo.com')} (backup:{' '}
-          {credit('MET Norway')}, {credit('CC BY 4.0')}) · Places: {credit('Photon')} and {credit('Nominatim')} · Map:{' '}
+          {credit('MET Norway')}, {credit('CC BY 4.0')}) · Places: {credit('Photon')} (backups:{' '}
+          {credit('Nominatim')}, {credit('Open-Meteo.com')}) · Map:{' '}
           {credit('OpenFreeMap')}
         </Typography>
       </Box>

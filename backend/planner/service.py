@@ -13,7 +13,7 @@ from requests.adapters import HTTPAdapter
 
 from .checkpoints import checkpoints
 from .geo import haversine_mi
-from .geocode import Geocoder, Nominatim, Place
+from .geocode import Geocoder, Nominatim, OpenMeteoPlaces, Place
 from .heatmap import Corridor, corridor_points
 from .metno import MetNorwayForecasts
 from .providers.base import RouteOption, RoutingError, RoutingProvider
@@ -96,8 +96,10 @@ SUGGEST_DEADLINE_SECONDS = 4.0
 
 
 def make_suggest_geocoder() -> Geocoder:
+    backup = OpenMeteoPlaces(settings.OPEN_METEO_GEOCODING_URL, settings.HTTP_USER_AGENT, SUGGEST_TIMEOUT_SECONDS,
+                             session=_session, deadline_s=SUGGEST_DEADLINE_SECONDS)
     return Geocoder(settings.PHOTON_URL, settings.HTTP_USER_AGENT, SUGGEST_TIMEOUT_SECONDS,
-                    session=_session, deadline_s=SUGGEST_DEADLINE_SECONDS)
+                    session=_session, deadline_s=SUGGEST_DEADLINE_SECONDS, search_backup=backup)
 
 
 # Shared by every request, so plans in the same minute stay within the weather service's limit together.

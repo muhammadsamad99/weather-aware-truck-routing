@@ -128,6 +128,7 @@ MET_NORWAY_MIN_INTERVAL_SECONDS = float(os.environ.get("MET_NORWAY_MIN_INTERVAL_
 PHOTON_URL = os.environ.get("PHOTON_URL", "https://photon.komoot.io/api/")
 NOMINATIM_URL = os.environ.get("NOMINATIM_URL", "https://nominatim.openstreetmap.org/search")
 NOMINATIM_MIN_INTERVAL_SECONDS = float(os.environ.get("NOMINATIM_MIN_INTERVAL_SECONDS", "1.0"))
+OPEN_METEO_GEOCODING_URL = os.environ.get("OPEN_METEO_GEOCODING_URL", "https://geocoding-api.open-meteo.com/v1/search")
 HTTP_USER_AGENT = "weather-aware-truck-routing/1.0 (+https://github.com/muhammadsamad99/weather-aware-truck-routing)"
 HTTP_TIMEOUT_SECONDS = float(os.environ.get("HTTP_TIMEOUT_SECONDS", "20"))
 

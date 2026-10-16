@@ -3,7 +3,9 @@ A query of the form "lat, lon" is taken as coordinates without a lookup.
 
 When Photon fails while a trip is being planned, the typed place is looked up with Nominatim
 (https://nominatim.openstreetmap.org), OpenStreetMap's own geocoder, instead. Its usage policy allows one request
-a second and no search-as-you-type, so it backs up the plan's lookups only, never the suggestions.
+a second and no search-as-you-type, so it backs up the plan's lookups only, never the suggestions. The
+suggestions' backup is Open-Meteo's geocoding API (https://open-meteo.com/en/docs/geocoding-api), which knows
+towns, cities and postcodes but no street addresses.
 
 Photon can rank a landmark above the town it is named after ("St. Louis, MO" finds a university first), so for
 a query without digits, towns and cities come first; a query with digits is likely an address and keeps
@@ -60,11 +62,13 @@ def parse_coords(query: str) -> Place | None:
 
 class Geocoder:
     def __init__(self, base_url: str, user_agent: str, timeout: float = 10.0, session: requests.Session | None = None,
-                 deadline_s: float = DEADLINE_SECONDS, backup: "Nominatim | None" = None):
+                 deadline_s: float = DEADLINE_SECONDS, backup: "Nominatim | None" = None,
+                 search_backup: "OpenMeteoPlaces | None" = None):
         self.base_url = base_url
         self.timeout = timeout
         self.deadline_s = deadline_s
-        self.backup = backup
+        self.backup = backup  # for first(): the plan's lookups
+        self.search_backup = search_backup  # for search(): the suggestions
         self.session = session or requests.Session()
         self.session.headers.update({"User-Agent": user_agent})
 
@@ -80,6 +84,20 @@ class Geocoder:
         if cached is not None:
             return cached
         try:
+            places = self._photon(query, limit)
+        except GeocodeError as err:
+            if self.search_backup is None:
+                raise
+            log.warning("place suggestions failed, so the backup was asked: %s", err)
+            try:
+                return self.search_backup.search(query, limit)
+            except GeocodeError as backup_err:
+                raise GeocodeError(f"{err} The backup also failed: {backup_err}", kind=err.kind) from backup_err
+        cache.set(key, places, CACHE_SECONDS)
+        return places
+
+    def _photon(self, query: str, limit: int) -> list[Place]:
+        try:
             resp = self.session.get(self.base_url, params={"q": query, "limit": limit, "lang": "en"},
                                     timeout=self.timeout, stream=True)
             if resp.status_code != 200:
@@ -94,7 +112,6 @@ class Geocoder:
         except (requests.RequestException, SlowResponse, ValueError, KeyError, TypeError, IndexError,
                 AttributeError) as err:
             raise GeocodeError(f"Place search failed ({type(err).__name__}).") from err
-        cache.set(key, places, CACHE_SECONDS)
         return places
 
     def first(self, query: str) -> Place:
@@ -160,6 +177,37 @@ class Nominatim:
         return place
 
 
+class OpenMeteoPlaces:
+    """Place suggestions from Open-Meteo's geocoding API: towns, cities and postcodes, cached like Photon's."""
+
+    def __init__(self, base_url: str, user_agent: str, timeout: float = 10.0,
+                 session: requests.Session | None = None, deadline_s: float = DEADLINE_SECONDS):
+        self.base_url = base_url
+        self.timeout = timeout
+        self.deadline_s = deadline_s
+        self.session = session or requests.Session()
+        self.session.headers.update({"User-Agent": user_agent})
+
+    def search(self, query: str, limit: int = SEARCH_LIMIT) -> list[Place]:
+        key = "omgeo:" + hashlib.sha256(f"{limit}:{query.lower()}".encode()).hexdigest()
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
+        try:
+            resp = self.session.get(self.base_url, params={"name": query, "count": limit, "language": "en",
+                                                           "format": "json"}, timeout=self.timeout, stream=True)
+            if resp.status_code != 200:
+                resp.close()
+                raise GeocodeError(f"Backup place suggestions failed (HTTP {resp.status_code}).")
+            results = read_json(resp, deadline_s=self.deadline_s).get("results", [])  # no "results": no match
+            places = [Place(label=open_meteo_label(r), lat=float(r["latitude"]), lon=float(r["longitude"]))
+                      for r in results]
+        except (requests.RequestException, SlowResponse, ValueError, KeyError, TypeError, AttributeError) as err:
+            raise GeocodeError(f"Backup place suggestions failed ({type(err).__name__}).") from err
+        cache.set(key, places, CACHE_SECONDS)
+        return places
+
+
 def _settlement_rank(props: dict) -> int:
     if props.get("osm_key") == "place":
         return 0  # city, town, village, hamlet, suburb...
@@ -181,4 +229,11 @@ def nominatim_label(result: dict) -> str:
     town = address.get("city") or address.get("town") or address.get("village")
     code = (address.get("country_code") or "").upper()
     parts = [name, town if town != name else None, address.get("state"), code]
+    return ", ".join(p for p in parts if p)
+
+
+def open_meteo_label(result: dict) -> str:
+    """The same shape as Photon's labels: name, state, country code."""
+    name, region = result.get("name"), result.get("admin1")
+    parts = [name, region if region != name else None, result.get("country_code")]
     return ", ".join(p for p in parts if p)
