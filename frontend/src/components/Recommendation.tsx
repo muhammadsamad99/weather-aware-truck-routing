@@ -29,6 +29,13 @@ export default function Recommendation({ plan }: { plan: Plan }) {
         <br />
         Leaves {formatDateTime(plan.departure)} · {formatLoad(plan.load_lb)} · checked every {plan.interval_mi} mi
       </Typography>
+      {plan.weather_source === 'met-norway' && (
+        <Typography variant="caption" component="p" color="text.secondary" sx={{ mt: 0.5 }}>
+          <strong>Backup forecast from MET Norway</strong>, because the main weather service didn't answer. Snow is
+          estimated from the type of precipitation, and the heatmap covers only the hours MET Norway forecasts hour by
+          hour.
+        </Typography>
+      )}
       {plan.weather_grid_deg > 0.1 && (
         <Typography variant="caption" component="p" color="text.secondary" sx={{ mt: 0.5 }}>
           A long trip: the forecast is read on a {plan.weather_grid_deg}° grid (about{' '}

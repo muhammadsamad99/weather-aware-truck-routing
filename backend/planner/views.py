@@ -31,6 +31,9 @@ FAILURE_MESSAGES = {
     ("weather", "bad_answer"): f"The weather service sent an answer the app couldn't read. {TRY_LATER}",
     ("weather", "missing"): "The forecast is incomplete for part of this trip, so it can't be rated safely. "
                             "Please try again later, or choose another departure time.",
+    ("weather", "backup_range"): "The main weather service isn't answering, and the backup forecasts only about the "
+                                 "next 2½ days hour by hour, which this trip runs past. Choose an earlier "
+                                 "departure, or try again later.",
 }
 
 

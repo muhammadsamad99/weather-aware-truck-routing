@@ -64,6 +64,7 @@ export interface Plan {
   tradeoff: string | null // when the recommended route isn't the fastest: the extra time and what it buys
   levels: LevelName[]
   weather_grid_deg: number // 0.1 normally; wider on long trips, to stay within the forecast service's limits
+  weather_source: 'open-meteo' | 'met-norway' // MET Norway is the backup when Open-Meteo fails
   heatmap: Heatmap
 }
 

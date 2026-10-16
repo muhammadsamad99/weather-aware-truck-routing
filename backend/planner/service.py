@@ -15,11 +15,21 @@ from .checkpoints import checkpoints
 from .geo import haversine_mi
 from .geocode import Geocoder, Nominatim, Place
 from .heatmap import Corridor, corridor_points
+from .metno import MetNorwayForecasts
 from .providers.base import RouteOption, RoutingError, RoutingProvider
 from .providers.valhalla import Throttle, ValhallaProvider
 from .recommend import rank, reason, route_risk, shown, tradeoff
 from .risk import LEVEL_NAMES, assess
-from .weather import GRID_DEG, PER_MINUTE, Forecasts, HourWeather, MinuteQuota, WeatherError, hour_floor
+from .weather import (
+    GRID_DEG,
+    PER_MINUTE,
+    ForecastRangeError,
+    Forecasts,
+    HourWeather,
+    MinuteQuota,
+    WeatherError,
+    hour_floor,
+)
 
 log = logging.getLogger(__name__)
 
@@ -89,7 +99,17 @@ def make_forecasts() -> Forecasts:
                      quota=_weather_quota)
 
 
-def plan_trip(trip: TripRequest, provider: RoutingProvider | None = None, forecasts: Forecasts | None = None) -> dict:
+# Shared by every request: MET Norway allows at most 20 requests a second from the whole app.
+_met_throttle = Throttle(settings.MET_NORWAY_MIN_INTERVAL_SECONDS)
+
+
+def make_backup_forecasts() -> MetNorwayForecasts:
+    return MetNorwayForecasts(settings.MET_NORWAY_URL, settings.HTTP_USER_AGENT, _met_throttle,
+                              settings.HTTP_TIMEOUT_SECONDS, session=_session)
+
+
+def plan_trip(trip: TripRequest, provider: RoutingProvider | None = None, forecasts: Forecasts | None = None,
+              backup_forecasts: Forecasts | None = None) -> dict:
     provider = provider or make_provider()
     forecasts = forecasts or make_forecasts()
     origin, destination = (trip.origin.lat, trip.origin.lon), (trip.destination.lat, trip.destination.lon)
@@ -105,7 +125,7 @@ def plan_trip(trip: TripRequest, provider: RoutingProvider | None = None, foreca
     start = hour_floor(trip.departure)
     end = max(last_eta, start + timedelta(hours=HEATMAP_HOURS)) + timedelta(hours=1)
     places = [(c.lat, c.lon) for cps in route_cps for c in cps] + corridor.points
-    forecasts.load(places, start.date(), end.date())
+    forecasts = _load_forecasts(forecasts, backup_forecasts, places, start, end, last_eta)
     log.info("plan %.0f mi apart: routes %.1fs, forecasts for %d places %.1fs", haversine_mi(origin, destination),
              routed - started, len(places), time.monotonic() - routed)
 
@@ -148,6 +168,7 @@ def plan_trip(trip: TripRequest, provider: RoutingProvider | None = None, foreca
                      if fastest != best else None),
         "levels": list(LEVEL_NAMES),
         "weather_grid_deg": getattr(forecasts, "grid_deg", GRID_DEG),
+        "weather_source": getattr(forecasts, "source", "open-meteo"),
         "heatmap": _heatmap(corridor, forecasts, trip),
     }
 
@@ -163,6 +184,29 @@ def cached_routes(provider: RoutingProvider, origin, destination, load_lb: float
         routes = provider.routes(origin, destination, load_lb, count=3)
         caches["routes"].set(key, routes, ROUTE_CACHE_SECONDS)
     return routes
+
+
+def _load_forecasts(forecasts: Forecasts, backup: Forecasts | None, places, start: datetime, end: datetime,
+                    last_eta: datetime) -> Forecasts:
+    """The forecasts for these places. When the weather service fails, MET Norway's instead; when both fail, the
+    weather service's error, with the backup's added for the log."""
+    try:
+        forecasts.load(places, start.date(), end.date())
+        return forecasts
+    except ForecastRangeError:
+        raise  # the departure is too far ahead: the backup reaches less far still
+    except WeatherError as err:
+        log.warning("weather service failed, so the backup was asked: %s", err)
+        backup = backup or make_backup_forecasts()
+        try:
+            backup.load(places, start.date(), end.date())
+        except WeatherError as backup_err:
+            raise WeatherError(f"{err} The backup also failed: {backup_err}", kind=err.kind) from backup_err
+    hourly_until = getattr(backup, "hourly_until", None)
+    if hourly_until is None or hourly_until < hour_floor(last_eta) + timedelta(hours=1):
+        raise WeatherError(f"The backup has hourly forecasts only until {hourly_until}, before the trip ends.",
+                           kind="backup_range")
+    return backup
 
 
 def _iso(moment: datetime) -> str:

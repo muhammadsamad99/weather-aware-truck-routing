@@ -121,6 +121,8 @@ VALHALLA_URL = os.environ.get("VALHALLA_URL", "https://valhalla1.openstreetmap.d
 # The public server's usage policy (FOSSGIS): at most one request per second. Set 0 for your own server.
 VALHALLA_MIN_INTERVAL_SECONDS = float(os.environ.get("VALHALLA_MIN_INTERVAL_SECONDS", "1.0"))
 OPEN_METEO_URL = os.environ.get("OPEN_METEO_URL", "https://api.open-meteo.com/v1/forecast")
+MET_NORWAY_URL = os.environ.get("MET_NORWAY_URL", "https://api.met.no/weatherapi/locationforecast/2.0/compact")
+MET_NORWAY_MIN_INTERVAL_SECONDS = float(os.environ.get("MET_NORWAY_MIN_INTERVAL_SECONDS", "0.1"))
 PHOTON_URL = os.environ.get("PHOTON_URL", "https://photon.komoot.io/api/")
 NOMINATIM_URL = os.environ.get("NOMINATIM_URL", "https://nominatim.openstreetmap.org/search")
 NOMINATIM_MIN_INTERVAL_SECONDS = float(os.environ.get("NOMINATIM_MIN_INTERVAL_SECONDS", "1.0"))

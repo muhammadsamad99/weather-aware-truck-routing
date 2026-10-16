@@ -27,6 +27,8 @@ const CREDITS: [string, string][] = [
   ['OpenStreetMap contributors', 'https://www.openstreetmap.org/copyright'],
   ['fix the map', 'https://www.openstreetmap.org/fixthemap'],
   ['Open-Meteo.com', 'https://open-meteo.com/'],
+  ['MET Norway', 'https://api.met.no/'],
+  ['CC BY 4.0', 'https://creativecommons.org/licenses/by/4.0/'],
   ['Photon', 'https://photon.komoot.io/'],
   ['Nominatim', 'https://nominatim.org/'],
   ['OpenFreeMap', 'https://openfreemap.org/'],
@@ -231,7 +233,8 @@ export default function App() {
       >
         <Typography variant="caption" component="p" color="text.secondary">
           Routes: {credit('Valhalla')} on the {credit('FOSSGIS')} server · Map data © {credit('OpenStreetMap contributors')}{' '}
-          ({credit('fix the map')}) · Weather data by {credit('Open-Meteo.com')} · Places: {credit('Photon')} and {credit('Nominatim')} · Map:{' '}
+          ({credit('fix the map')}) · Weather data by {credit('Open-Meteo.com')} (backup:{' '}
+          {credit('MET Norway')}, {credit('CC BY 4.0')}) · Places: {credit('Photon')} and {credit('Nominatim')} · Map:{' '}
           {credit('OpenFreeMap')}
         </Typography>
       </Box>
