@@ -120,6 +120,8 @@ ROUTING_PROVIDER = os.environ.get("ROUTING_PROVIDER", "valhalla")
 VALHALLA_URL = os.environ.get("VALHALLA_URL", "https://valhalla1.openstreetmap.de")
 # The public server's usage policy (FOSSGIS): at most one request per second. Set 0 for your own server.
 VALHALLA_MIN_INTERVAL_SECONDS = float(os.environ.get("VALHALLA_MIN_INTERVAL_SECONDS", "1.0"))
+OSRM_URL = os.environ.get("OSRM_URL", "https://router.project-osrm.org")
+OSRM_MIN_INTERVAL_SECONDS = float(os.environ.get("OSRM_MIN_INTERVAL_SECONDS", "1.0"))
 OPEN_METEO_URL = os.environ.get("OPEN_METEO_URL", "https://api.open-meteo.com/v1/forecast")
 MET_NORWAY_URL = os.environ.get("MET_NORWAY_URL", "https://api.met.no/weatherapi/locationforecast/2.0/compact")
 MET_NORWAY_MIN_INTERVAL_SECONDS = float(os.environ.get("MET_NORWAY_MIN_INTERVAL_SECONDS", "0.1"))

@@ -17,6 +17,7 @@ from .geocode import Geocoder, Nominatim, Place
 from .heatmap import Corridor, corridor_points
 from .metno import MetNorwayForecasts
 from .providers.base import RouteOption, RoutingError, RoutingProvider
+from .providers.osrm import OsrmProvider
 from .providers.valhalla import Throttle, ValhallaProvider
 from .recommend import rank, reason, route_risk, shown, tradeoff
 from .risk import LEVEL_NAMES, assess
@@ -68,6 +69,15 @@ def make_provider() -> RoutingProvider:
     raise RoutingError(f"Unknown routing provider '{settings.ROUTING_PROVIDER}'.")
 
 
+# Shared by every request: OSRM's demo server asks for at most one request a second.
+_osrm_throttle = Throttle(settings.OSRM_MIN_INTERVAL_SECONDS)
+
+
+def make_backup_provider() -> RoutingProvider:
+    return OsrmProvider(settings.OSRM_URL, settings.HTTP_USER_AGENT, _osrm_throttle, settings.HTTP_TIMEOUT_SECONDS,
+                        session=_session)
+
+
 # Shared by every request: Nominatim's policy is at most one request a second from the whole service.
 _nominatim_throttle = Throttle(settings.NOMINATIM_MIN_INTERVAL_SECONDS)
 
@@ -109,14 +119,14 @@ def make_backup_forecasts() -> MetNorwayForecasts:
 
 
 def plan_trip(trip: TripRequest, provider: RoutingProvider | None = None, forecasts: Forecasts | None = None,
-              backup_forecasts: Forecasts | None = None) -> dict:
+              backup_forecasts: Forecasts | None = None, backup_provider: RoutingProvider | None = None) -> dict:
     provider = provider or make_provider()
     forecasts = forecasts or make_forecasts()
     origin, destination = (trip.origin.lat, trip.origin.lon), (trip.destination.lat, trip.destination.lon)
     if haversine_mi(origin, destination) < 1:
         raise InvalidTrip("Origin and destination are the same place.")
     started = time.monotonic()
-    routes = cached_routes(provider, origin, destination, trip.load_lb)
+    routes = _routes(provider, backup_provider, origin, destination, trip.load_lb)
     routed = time.monotonic()
 
     route_cps = [checkpoints(r, trip.interval_mi, trip.departure) for r in routes]
@@ -160,7 +170,7 @@ def plan_trip(trip: TripRequest, provider: RoutingProvider | None = None, foreca
         "departure": _iso(trip.departure),
         "load_lb": trip.load_lb,
         "interval_mi": trip.interval_mi,
-        "provider": provider.name,
+        "provider": routes[0].provider,
         "routes": results,
         "recommended": results[best]["name"],
         "reason": reason(risks[best], risks[runner_up] if runner_up is not None else None),
@@ -184,6 +194,22 @@ def cached_routes(provider: RoutingProvider, origin, destination, load_lb: float
         routes = provider.routes(origin, destination, load_lb, count=3)
         caches["routes"].set(key, routes, ROUTE_CACHE_SECONDS)
     return routes
+
+
+def _routes(provider: RoutingProvider, backup: RoutingProvider | None, origin, destination,
+            load_lb: float) -> list[RouteOption]:
+    """The trip's routes. When the routing service fails, OSRM's car routes instead; "no route" is an answer, so
+    it stays final. When both fail, the routing service's error, with the backup's added for the log."""
+    try:
+        return cached_routes(provider, origin, destination, load_lb)
+    except RoutingError as err:
+        if err.kind == "no_route":
+            raise
+        log.warning("routing service failed, so the backup was asked: %s", err)
+        try:
+            return cached_routes(backup or make_backup_provider(), origin, destination, load_lb)
+        except RoutingError as backup_err:
+            raise RoutingError(f"{err} The backup also failed: {backup_err}", kind=err.kind) from backup_err
 
 
 def _load_forecasts(forecasts: Forecasts, backup: Forecasts | None, places, start: datetime, end: datetime,

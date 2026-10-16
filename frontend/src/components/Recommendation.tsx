@@ -1,3 +1,4 @@
+import Alert from '@mui/material/Alert'
 import Paper from '@mui/material/Paper'
 import Typography from '@mui/material/Typography'
 import { alpha } from '@mui/material/styles'
@@ -29,6 +30,12 @@ export default function Recommendation({ plan }: { plan: Plan }) {
         <br />
         Leaves {formatDateTime(plan.departure)} · {formatLoad(plan.load_lb)} · checked every {plan.interval_mi} mi
       </Typography>
+      {plan.provider === 'osrm' && (
+        <Alert severity="warning" sx={{ mt: 1 }}>
+          <strong>Backup routes from OSRM</strong>, because the truck routing service didn't answer. They follow car
+          roads and car driving times; the truck's weight isn't considered.
+        </Alert>
+      )}
       {plan.weather_source === 'met-norway' && (
         <Typography variant="caption" component="p" color="text.secondary" sx={{ mt: 0.5 }}>
           <strong>Backup forecast from MET Norway</strong>, because the main weather service didn't answer. Snow is

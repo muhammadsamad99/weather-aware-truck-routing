@@ -57,7 +57,7 @@ export interface Plan {
   departure: string
   load_lb: number
   interval_mi: number
-  provider: string
+  provider: string // "valhalla"; "osrm" when Valhalla failed and the backup's car routes were used
   routes: PlannedRoute[]
   recommended: string
   reason: string

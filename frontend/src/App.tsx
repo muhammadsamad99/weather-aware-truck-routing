@@ -24,6 +24,7 @@ const EXAMPLE: Pick<TripFormValues, 'origin' | 'destination'> = {
 const CREDITS: [string, string][] = [
   ['Valhalla', 'https://valhalla.github.io/valhalla/'],
   ['FOSSGIS', 'https://www.fossgis.de/'],
+  ['OSRM', 'https://project-osrm.org/'],
   ['OpenStreetMap contributors', 'https://www.openstreetmap.org/copyright'],
   ['fix the map', 'https://www.openstreetmap.org/fixthemap'],
   ['Open-Meteo.com', 'https://open-meteo.com/'],
@@ -232,7 +233,7 @@ export default function App() {
         sx={{ gridArea: 'footer', px: 2.5, py: 1.5, borderRight: { md: 1 }, borderTop: 1, borderColor: 'divider' }}
       >
         <Typography variant="caption" component="p" color="text.secondary">
-          Routes: {credit('Valhalla')} on the {credit('FOSSGIS')} server · Map data © {credit('OpenStreetMap contributors')}{' '}
+          Routes: {credit('Valhalla')} on the {credit('FOSSGIS')} server (backup: {credit('OSRM')}) · Map data © {credit('OpenStreetMap contributors')}{' '}
           ({credit('fix the map')}) · Weather data by {credit('Open-Meteo.com')} (backup:{' '}
           {credit('MET Norway')}, {credit('CC BY 4.0')}) · Places: {credit('Photon')} and {credit('Nominatim')} · Map:{' '}
           {credit('OpenFreeMap')}
