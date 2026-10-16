@@ -13,7 +13,22 @@ trip corridor.
 
 React + TypeScript + Material UI + MapLibre GL on the front end, Django + Django REST Framework behind it.
 
+**Highlights**
+
+- **Routes for the truck's real weight.** Valhalla's `truck` costing gets the gross weight (an empty
+  tractor-trailer plus the load), which decides the roads and bridges the truck may use.
+- **Weather for the hour the truck is there.** Each checkpoint gets the rain and snow of the hour it is reached
+  in, and wind interpolated between the readings either side of its ETA.
+- **The brief's recommendation order, with the reason.** No Travel ranks last; then the fewest Severe miles,
+  High miles, average risk and time. When the pick isn't the fastest, the panel says what the extra time buys.
+- **A slider with no waiting.** All 49 hourly heatmap frames come with the plan, so moving the slider makes no
+  network request.
+- **Failures in plain words.** When a free service fails, the message says what failed and what to do. `lat, lon`
+  needs no place search, and Nominatim takes over a plan's place lookups when Photon fails.
+
 ![Chicago to Denver: three routes tagged with distance and driving time, the recommended route with what its extra time buys, checkpoints coloured by risk, and the corridor heatmap 24 hours after departure](docs/screenshot.jpg)
+
+![Orlando to West Palm Beach: the corridor heatmap as the slider moves from departure to 48 hours later, with the three routes and their checkpoints](docs/heatmap.gif)
 
 ## Using it
 
